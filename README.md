@@ -1,4 +1,4 @@
-# DWDM Topology — Proyecto Philadelphia
+# Topologia DWDM para una red de servicios de internet (ISP)
 
 Aplicación web full-stack para visualizar, gestionar y analizar la topología de red DWDM de un ISP en México.
 
