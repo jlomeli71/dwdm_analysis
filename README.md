@@ -1,4 +1,4 @@
-# Topologia DWDM para una red de servicios de internet (ISP)
+# Topologia DWDM para una red de servicios de Internet (ISP)
 
 Aplicación web full-stack para visualizar, gestionar y analizar la topología de red DWDM de un ISP en México.
 
