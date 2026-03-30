@@ -1,0 +1,30 @@
+# ─── Archivos de asistente AI ───────────────────────────────
+CLAUDE.md
+.gemini/
+.agent/
+.agents/
+_agent/
+_agents/
+
+# ─── Archivos de texto y notas de desarrollo ────────────────
+*.txt
+*.log
+notes/
+drafts/
+
+# ─── Sistema Operativo ──────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Editores ───────────────────────────────────────────────
+.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# ─── Node / Build (por si se agrega en el futuro) ───────────
+node_modules/
+dist/
+.env
+.env.local

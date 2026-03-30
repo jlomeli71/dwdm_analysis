@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DWDM Topology — Proyecto Philadelphia</title>
+  <meta name="description" content="Aplicación de gestión y visualización de topología DWDM para ISP México — Proyecto Philadelphia" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <!-- D3.js para grafo de topología -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<!-- Chart.js para dashboards -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Aplicar tema guardado antes de pintar (evita destello) -->
+  <script>if(localStorage.getItem('theme')==='light')document.body.classList.add('light');</script>
+
+  <!-- ── Top Nav ───────────────────────────────────────────────────────────── -->
+  <header class="topnav" id="topnav">
+    <div class="topnav-brand">
+      <span class="logo-icon">⬡</span>
+      <div>
+        <div class="logo-title">DWDM</div>
+        <div class="logo-sub">Proyecto Philadelphia</div>
+      </div>
+    </div>
+
+    <nav class="topnav-nav">
+      <a class="nav-item active" data-page="topology" href="#topology">
+        <span class="nav-icon">🗺</span>
+        <span class="nav-label">Topología</span>
+      </a>
+      <a class="nav-item" data-page="crud" href="#crud">
+        <span class="nav-icon">🗄</span>
+        <span class="nav-label">Sitios &amp; Lambdas</span>
+      </a>
+      <a class="nav-item" data-page="dashboard" href="#dashboard">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Dashboard</span>
+      </a>
+      <a class="nav-item" data-page="simulation" href="#simulation">
+        <span class="nav-icon">⚡</span>
+        <span class="nav-label">Simulación</span>
+      </a>
+      <a class="nav-item" data-page="reports" href="#reports">
+        <span class="nav-icon">📄</span>
+        <span class="nav-label">Reportes</span>
+      </a>
+    </nav>
+
+    <button id="theme-toggle" title="Modo claro"><span id="theme-icon">☀️</span><span id="theme-label">Claro</span></button>
+
+    <div class="topnav-info">
+      Red óptica ISP · C-band 96ch · Ciena &amp; Infinera
+    </div>
+  </header>
+
+  <!-- ── Main Content ────────────────────────────────────────────────────── -->
+  <main class="main-content" id="main-content">
+    <div id="page-container" style="padding:24px;height:100%;box-sizing:border-box;overflow-y:auto;"></div>
+  </main>
+
+  <!-- ── Toast container (sin JS inline) ──────────────────────────────────── -->
+  <div id="toast-container" style="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;"></div>
+
+  <!-- ── Scripts (type=module) ─────────────────────────────────────────────── -->
+  <script type="module">
+    import { renderTopology }   from './topology.js';
+    import { renderCrud }       from './crud.js';
+    import { renderDashboard }  from './dashboard.js';
+    import { renderSimulation } from './simulation.js';
+    import { renderReports }    from './reports.js';
+
+    const pages = {
+      topology:   renderTopology,
+      crud:       renderCrud,
+      dashboard:  renderDashboard,
+      simulation: renderSimulation,
+      reports:    renderReports,
+    };
+
+    const container = document.getElementById('page-container');
+
+    async function navigate(page) {
+      // Actualizar nav activo
+      document.querySelectorAll('.nav-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.page === page);
+      });
+      container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><span>Cargando…</span></div>';
+      try {
+        await pages[page](container);
+      } catch (err) {
+        console.error(err);
+        container.innerHTML = `<div class="error-state">
+          <div style="font-size:48px">⚠️</div>
+          <div>Error al cargar la página</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:8px">${err.message || ''}</div>
+        </div>`;
+      }
+    }
+
+    // Routing por hash
+    function getPage() {
+      const hash = location.hash.replace('#', '') || 'topology';
+      return pages[hash] ? hash : 'topology';
+    }
+
+    window.addEventListener('hashchange', () => navigate(getPage()));
+    navigate(getPage());
+
+    // ── Toggle de tema claro / oscuro ───────────────────────
+    const themeBtn   = document.getElementById('theme-toggle');
+    const themeIcon  = document.getElementById('theme-icon');
+    const themeLabel = document.getElementById('theme-label');
+    function syncThemeBtn() {
+      const isLight = document.body.classList.contains('light');
+      themeIcon.textContent  = isLight ? '🌙' : '☀️';
+      themeLabel.textContent = isLight ? 'Oscuro' : 'Claro';
+      themeBtn.title = isLight ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro';
+    }
+    syncThemeBtn();
+    themeBtn.addEventListener('click', () => {
+      document.body.classList.toggle('light');
+      localStorage.setItem('theme', document.body.classList.contains('light') ? 'light' : 'dark');
+      syncThemeBtn();
+    });
+  </script>
+</body>
+</html>
