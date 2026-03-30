@@ -12,6 +12,9 @@ _agents/
 notes/
 drafts/
 
+# ─── Documentos ─────────────────────────────────────────────
+*.pdf
+
 # ─── Sistema Operativo ──────────────────────────────────────
 .DS_Store
 Thumbs.db
