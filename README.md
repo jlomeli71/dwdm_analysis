@@ -1,6 +1,6 @@
-# DWDM Topology — Proyecto Philadelphia
+# Topologia DWDM para una red de servicios de Internet (ISP)
 
-Aplicación web full-stack para visualizar, gestionar y analizar la topología de red DWDM de un ISP en México.
+Aplicación web full-stack para visualizar y analizar la topología de red DWDM de un ISP en México.
 
 ## Stack
 
@@ -13,7 +13,7 @@ Aplicación web full-stack para visualizar, gestionar y analizar la topología d
 
 ## Arrancar la aplicación
 
-### Backend (Flask — Puerto 5000)
+### Backend (Flask — Puerto 5001)
 
 ```bash
 cd backend
@@ -50,7 +50,7 @@ Abrir en el navegador: **http://localhost:8080**
 | Lambdas (circuitos ópticos) | 22 |
 | Segmentos físicos únicos | ~45 |
 | Capacidad total | 2.2 Tbps |
-| Proveedores de fibra | AT&T, Axtel, Bestel, Marcatel, Totalplay, Maxcom, Quattrocom |
+| Proveedores de fibra | AT&T, Bestel, Marcatel, Maxcom, Cirion, QUATTROCOM |
 
 ## API Endpoints
 
