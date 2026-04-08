@@ -127,7 +127,10 @@ def simulate_by_provider():
     if not provider:
         return jsonify({"error": "Se debe especificar un proveedor."}), 422
 
-    segments = Segment.query.filter_by(fiber_provider=provider).all()
+    # Usar LIKE para encontrar segmentos con este proveedor aunque sea multi-proveedor (ej. "AT&T, Bestel")
+    segments = Segment.query.filter(
+        Segment.fiber_provider.like(f"%{provider}%")
+    ).all()
     if not segments:
         return jsonify({"error": f"No hay segmentos con proveedor '{provider}'."}), 404
 

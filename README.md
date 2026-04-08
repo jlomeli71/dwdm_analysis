@@ -25,7 +25,7 @@ cd backend
 python run.py
 ```
 
-El backend arranca en `http://localhost:5000`.
+El backend arranca en `http://localhost:5001`.
 La base de datos SQLite (`dwdm.db`) se crea con los 30 sitios y 22 lambdas del Proyecto Philadelphia.
 
 ### Frontend (Servidor HTTP — Puerto 8080)
@@ -50,7 +50,7 @@ Abrir en el navegador: **http://localhost:8080**
 | Lambdas (circuitos ópticos) | 22 |
 | Segmentos físicos únicos | ~45 |
 | Capacidad total | 2.2 Tbps |
-| Proveedores de fibra | AT&T, Bestel, Marcatel, Maxcom, Cirion, QUATTROCOM |
+| Proveedores de fibra | AT&T, Axtel, Bestel, Marcatel, Totalplay, Maxcom, Quattrocom |
 
 ## API Endpoints
 

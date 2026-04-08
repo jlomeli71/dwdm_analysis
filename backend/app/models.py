@@ -83,7 +83,7 @@ class Segment(db.Model):
     site_a_id = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
     site_b_id = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
     fiber = db.Column(db.String(20), nullable=False, default="ruta_1")  # ruta_1 | ruta_2
-    fiber_provider = db.Column(db.String(50), nullable=True)
+    fiber_provider = db.Column(db.String(200), nullable=True)
     ola_count = db.Column(db.Integer, default=0)  # amplificadores ópticos intermedios
 
     # Relaciones

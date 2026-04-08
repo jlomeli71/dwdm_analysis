@@ -27,11 +27,12 @@ def get_kpis():
     all_segments = Segment.query.all()
     alert_segments = [s for s in all_segments if s.usage_count >= 77]
 
-    # Proveedor más común
+    # Proveedor más común (soporta multi-proveedor separado por coma)
     providers = {}
     for seg in all_segments:
-        p = seg.fiber_provider or "Desconocido"
-        providers[p] = providers.get(p, 0) + 1
+        raw = seg.fiber_provider or "Desconocido"
+        for p in [x.strip() for x in raw.split(",")]:
+            providers[p] = providers.get(p, 0) + 1
     top_provider = max(providers, key=providers.get) if providers else None
 
     return jsonify({
@@ -108,10 +109,12 @@ def get_segment_usage():
 def get_provider_distribution():
     """Distribución de segmentos por proveedor de fibra."""
     segments = Segment.query.all()
+    # Soporta multi-proveedor separado por coma (ej. "AT&T, Bestel")
     providers: dict[str, int] = {}
     for seg in segments:
-        p = seg.fiber_provider or "Desconocido"
-        providers[p] = providers.get(p, 0) + 1
+        raw = seg.fiber_provider or "Desconocido"
+        for p in [x.strip() for x in raw.split(",")]:
+            providers[p] = providers.get(p, 0) + 1
 
     return jsonify([
         {"provider": p, "count": c}

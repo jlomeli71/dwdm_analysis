@@ -1,8 +1,8 @@
 /**
  * API Client — Todas las llamadas al backend Flask.
- * Base URL: http://localhost:5000/api/v1
+ * Base URL: http://localhost:5001/api/v1
  */
-const BASE = "http://localhost:5000/api/v1";
+const BASE = "http://localhost:5001/api/v1";
 
 async function request(method, path, body = null) {
   const opts = {
