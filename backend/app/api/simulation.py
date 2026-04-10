@@ -17,10 +17,12 @@ def _run_simulation(failed_segment_ids: list[int]) -> dict:
     failed_segments = Segment.query.filter(Segment.id.in_(failed_segment_ids)).all()
     failed_info = [
         {
-            "id": s.id,
-            "site_a_id": s.site_a_id,
-            "site_b_id": s.site_b_id,
-            "fiber": s.fiber,
+            "id":           s.id,
+            "site_a_id":    s.site_a_id,
+            "site_b_id":    s.site_b_id,
+            "site_a_name":  s.site_a.name if s.site_a else s.site_a_id,
+            "site_b_name":  s.site_b.name if s.site_b else s.site_b_id,
+            "fiber":        s.fiber,
             "fiber_provider": s.fiber_provider,
         }
         for s in failed_segments
@@ -103,8 +105,8 @@ def simulate_by_segments():
 
     if not segment_ids:
         return jsonify({"error": "Se debe especificar al menos un segmento."}), 422
-    if len(segment_ids) > 2:
-        return jsonify({"error": "Se pueden simular máximo 2 segmentos simultáneos."}), 422
+    if len(segment_ids) > 3:
+        return jsonify({"error": "Se pueden simular máximo 3 segmentos simultáneos."}), 422
 
     # Validar que existan
     for sid in segment_ids:

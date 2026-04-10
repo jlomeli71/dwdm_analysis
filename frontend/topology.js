@@ -938,6 +938,66 @@ function _downloadText(text, filename, mime = "text/plain") {
   _download(URL.createObjectURL(new Blob([text], { type: mime })), filename);
 }
 
+/**
+ * Paso 1 – DOM walk: copia fill/stroke computados del SVG vivo al clon.
+ * getComputedStyle sobre los elementos vivos ya tiene los var() resueltos
+ * por el browser, así que obtenemos el color real (p.ej. "rgb(19,30,53)").
+ */
+function _applyComputedColors(liveEl, cloneEl) {
+  if (!liveEl || liveEl.nodeType !== Node.ELEMENT_NODE) return;
+  try {
+    const cs = window.getComputedStyle(liveEl);
+    if ((liveEl.getAttribute('fill')   || '').includes('var(')) {
+      const v = cs.getPropertyValue('fill').trim();
+      if (v) cloneEl.setAttribute('fill', v);
+    }
+    if ((liveEl.getAttribute('stroke') || '').includes('var(')) {
+      const v = cs.getPropertyValue('stroke').trim();
+      if (v) cloneEl.setAttribute('stroke', v);
+    }
+  } catch (_) { /* ignorar si el elemento no soporta getComputedStyle */ }
+  const lc = liveEl.children, cc = cloneEl.children;
+  for (let i = 0; i < lc.length && i < cc.length; i++) _applyComputedColors(lc[i], cc[i]);
+}
+
+/**
+ * Paso 2 – String replace: sustituye cualquier var(--x) residual en el
+ * texto serializado, usando los valores del :root del documento actual.
+ * Sirve como seguro adicional para referencias que el paso 1 no alcance.
+ */
+function _resolveVars(svgData) {
+  const isLight = document.body.classList.contains('light');
+  // Valores explícitos según tema (más fiable que getPropertyValue en exports)
+  const palette = isLight ? {
+    '--bg-card':        '#ffffff',
+    '--accent-blue':    '#2d8bff',
+    '--accent-purple':  '#a855f7',
+    '--text-secondary': '#445577',
+    '--text-muted':     '#7a94bb',
+    '--text-primary':   '#1a2845',
+    '--border':         '#c8d8f0',
+    '--font-mono':      'monospace',
+  } : {
+    '--bg-card':        '#131e35',
+    '--accent-blue':    '#2d8bff',
+    '--accent-purple':  '#a855f7',
+    '--text-secondary': '#8899bb',
+    '--text-muted':     '#4d6080',
+    '--text-primary':   '#e8f0fe',
+    '--border':         '#1e3058',
+    '--font-mono':      'monospace',
+  };
+  let out = svgData;
+  for (const [v, val] of Object.entries(palette)) {
+    out = out.split(`var(${v})`).join(val);
+  }
+  // var(--font-mono, monospace) con fallback explícito
+  out = out.replace(/var\(--font-mono,\s*monospace\)/g, 'monospace');
+  // Eliminar cualquier var() sin resolver restante (evita render negro)
+  out = out.replace(/var\(--[\w-]+(?:,\s*[^)]+)?\)/g, 'currentColor');
+  return out;
+}
+
 /** Renderiza el SVG actual en un canvas 2× y devuelve { canvas, W, H, bg }. */
 function _svgToCanvas() {
   return new Promise(resolve => {
@@ -948,13 +1008,17 @@ function _svgToCanvas() {
     clone.setAttribute("width",  W);
     clone.setAttribute("height", H);
 
+    // Paso 1: colores computados del árbol vivo → clon (resuelve var(--x))
+    _applyComputedColors(svgEl, clone);
+
     const bg = document.body.classList.contains("light") ? "#f8f9fc" : "#1a1d27";
     const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
     bgRect.setAttribute("width", W); bgRect.setAttribute("height", H);
     bgRect.setAttribute("fill", bg);
     clone.insertBefore(bgRect, clone.firstChild);
 
-    const svgData = new XMLSerializer().serializeToString(clone);
+    // Paso 2: eliminar cualquier var() residual en el texto serializado
+    const svgData = _resolveVars(new XMLSerializer().serializeToString(clone));
     const blobUrl = URL.createObjectURL(new Blob([svgData], { type: "image/svg+xml;charset=utf-8" }));
     const img = new Image();
     img.onload = () => {
@@ -986,13 +1050,17 @@ function exportAsSVG() {
   clone.setAttribute("width",  W);
   clone.setAttribute("height", H);
 
+  // Paso 1: colores computados del árbol vivo → clon
+  _applyComputedColors(svgEl, clone);
+
   const bg = document.body.classList.contains("light") ? "#f8f9fc" : "#1a1d27";
   const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
   bgRect.setAttribute("width", W); bgRect.setAttribute("height", H);
   bgRect.setAttribute("fill", bg);
   clone.insertBefore(bgRect, clone.firstChild);
 
-  _downloadText(new XMLSerializer().serializeToString(clone), "topologia-dwdm.svg", "image/svg+xml");
+  // Paso 2: var() residuales en el texto serializado
+  _downloadText(_resolveVars(new XMLSerializer().serializeToString(clone)), "topologia-dwdm.svg", "image/svg+xml");
 }
 
 async function exportAsPDF() {

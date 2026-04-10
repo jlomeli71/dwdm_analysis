@@ -56,21 +56,27 @@ def create_lambda():
 
     # Insertar segmentos
     segments_data = data.get("segments", [])
-    for idx, seg_data in enumerate(segments_data):
-        site_a = seg_data.get("site_a_id", "")
-        site_b = seg_data.get("site_b_id", "")
-        fiber = seg_data.get("fiber", "ruta_1")
-        provider = seg_data.get("fiber_provider", "")
+    order = 0
+    for seg_data in segments_data:
+        site_a = seg_data.get("site_a_id", "").strip()
+        site_b = seg_data.get("site_b_id", "").strip()
+        if not site_a or not site_b or site_a == site_b:
+            continue  # ignorar tramos inválidos o bucles
+        fiber    = seg_data.get("fiber", "ruta_1")
+        provider = seg_data.get("fiber_provider", "").strip()
 
         can_a, can_b = _canonical(site_a, site_b)
         seg = Segment.query.filter_by(site_a_id=can_a, site_b_id=can_b, fiber=fiber).first()
         if not seg:
-            seg = Segment(site_a_id=can_a, site_b_id=can_b, fiber=fiber, fiber_provider=provider)
+            seg = Segment(site_a_id=can_a, site_b_id=can_b, fiber=fiber, fiber_provider=provider or None)
             db.session.add(seg)
             db.session.flush()
+        elif provider:
+            seg.fiber_provider = provider  # actualizar proveedor si el usuario lo cambió
 
-        ls = LambdaSegment(lambda_id=lam.id, segment_id=seg.id, order_index=idx)
+        ls = LambdaSegment(lambda_id=lam.id, segment_id=seg.id, order_index=order)
         db.session.add(ls)
+        order += 1
 
     db.session.commit()
     return jsonify(lam.to_dict(include_segments=True)), 201
@@ -100,21 +106,27 @@ def update_lambda(lambda_id):
 
     # Actualizar segmentos si se proporcionan
     if "segments" in data:
-        LambdaSegment.query.filter_by(lambda_id=lam.id).delete()
+        LambdaSegment.query.filter_by(lambda_id=lam.id).delete(synchronize_session=False)
         db.session.flush()
-        for idx, seg_data in enumerate(data["segments"]):
-            site_a = seg_data.get("site_a_id", "")
-            site_b = seg_data.get("site_b_id", "")
-            fiber = seg_data.get("fiber", "ruta_1")
-            provider = seg_data.get("fiber_provider", "")
+        order = 0
+        for seg_data in data["segments"]:
+            site_a = seg_data.get("site_a_id", "").strip()
+            site_b = seg_data.get("site_b_id", "").strip()
+            if not site_a or not site_b or site_a == site_b:
+                continue  # ignorar tramos inválidos o bucles
+            fiber    = seg_data.get("fiber", "ruta_1")
+            provider = seg_data.get("fiber_provider", "").strip()
             can_a, can_b = _canonical(site_a, site_b)
             seg = Segment.query.filter_by(site_a_id=can_a, site_b_id=can_b, fiber=fiber).first()
             if not seg:
-                seg = Segment(site_a_id=can_a, site_b_id=can_b, fiber=fiber, fiber_provider=provider)
+                seg = Segment(site_a_id=can_a, site_b_id=can_b, fiber=fiber, fiber_provider=provider or None)
                 db.session.add(seg)
                 db.session.flush()
-            ls = LambdaSegment(lambda_id=lam.id, segment_id=seg.id, order_index=idx)
+            elif provider:
+                seg.fiber_provider = provider  # actualizar proveedor si el usuario lo cambió
+            ls = LambdaSegment(lambda_id=lam.id, segment_id=seg.id, order_index=order)
             db.session.add(ls)
+            order += 1
 
     db.session.commit()
     return jsonify(lam.to_dict(include_segments=True))

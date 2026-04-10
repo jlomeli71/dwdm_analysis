@@ -27,7 +27,7 @@ function openModal(html, onSubmit) {
   overlay.innerHTML = `<div class="modal">${html}</div>`;
   overlay.addEventListener("click", e => { if (e.target === overlay) closeModal(); });
   document.body.appendChild(overlay);
-  overlay.querySelector(".modal-cancel")?.addEventListener("click", closeModal);
+  overlay.querySelectorAll(".modal-cancel").forEach(btn => btn.addEventListener("click", closeModal));
   overlay.querySelector(".modal-submit")?.addEventListener("click", onSubmit);
 }
 
@@ -290,14 +290,38 @@ window._deleteSite = async id => {
 
 function openLambdaModal(lambda = null) {
   const isEdit = !!lambda;
-  const segs = lambda?.segments || [];
+  const segs   = lambda?.segments || [];
+  const PROVIDERS = ['AT&T', 'Bestel', 'Marcatel', 'Totalplay', 'Axtel', 'Maxcom', 'Quattrocom', 'Cirion', 'Unknown'];
+
+  // Genera las <option> de sitios, marcando el seleccionado
+  function siteOpts(selId) {
+    let html = '<option value="">— Sitio —</option>';
+    for (const s of allSites)
+      html += `<option value="${s.id}"${s.id === selId ? ' selected' : ''}>${s.id} — ${s.name}</option>`;
+    return html;
+  }
+
+  // HTML de una fila de segmento (seg puede ser null para fila nueva)
+  function segRowHTML(seg) {
+    const f = seg?.fiber || 'ruta_1';
+    return `<div class="seg-row" style="display:grid;grid-template-columns:1fr 1fr 90px 1fr 34px;gap:6px;align-items:center;margin-bottom:6px;">
+      <select class="seg-a" style="font-size:12px;">${siteOpts(seg?.site_a_id || '')}</select>
+      <select class="seg-b" style="font-size:12px;">${siteOpts(seg?.site_b_id || '')}</select>
+      <select class="seg-fiber" style="font-size:12px;">
+        <option value="ruta_1"${f === 'ruta_1' ? ' selected' : ''}>ruta_1</option>
+        <option value="ruta_2"${f === 'ruta_2' ? ' selected' : ''}>ruta_2</option>
+      </select>
+      <input class="seg-provider" list="providers-dl" placeholder="Proveedor" style="font-size:12px;" value="${seg?.fiber_provider || ''}">
+      <button type="button" class="btn btn-danger btn-sm seg-rm" title="Eliminar tramo" style="padding:0 8px;font-size:15px;line-height:1;">✕</button>
+    </div>`;
+  }
 
   openModal(`
     <div class="modal-header">
       <div class="modal-title">${isEdit ? "✏️ Editar Lambda" : "➕ Nueva Lambda"}</div>
       <button class="btn btn-icon modal-cancel" style="font-size:18px;">✕</button>
     </div>
-    <div class="modal-body">
+    <div class="modal-body" style="overflow-y:auto;max-height:calc(90vh - 130px);">
       <div class="form-grid">
         <div class="form-group full">
           <label>Nombre *</label>
@@ -319,10 +343,35 @@ function openLambdaModal(lambda = null) {
           <input type="number" id="f-lam-cap" value="${lambda?.capacity_per_lambda || 100}">
         </div>
         <div class="form-group full">
-          <label>Lambda de protección 1+1 (nombre exacto)</label>
-          <input id="f-lam-prot" value="${lambda?.protection_route_name || ''}" placeholder="Nombre de la lambda de respaldo">
+          <label>Lambda de protección 1+1</label>
+          <input id="f-lam-prot" value="${lambda?.protection_route_name || ''}" placeholder="Nombre exacto de la lambda de respaldo">
         </div>
       </div>
+
+      <!-- ── Trayectoria ── -->
+      <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <label style="font-size:13px;font-weight:700;color:var(--text-primary);">🔗 Trayectoria — Segmentos</label>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-seg">＋ Agregar tramo</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 90px 1fr 34px;gap:6px;padding-bottom:4px;
+                    font-size:10px;font-weight:600;letter-spacing:0.5px;color:var(--text-muted);text-transform:uppercase;">
+          <span>Sitio A</span><span>Sitio B</span><span>Fibra</span><span>Proveedor</span><span></span>
+        </div>
+        <div id="f-lam-segments">
+          ${segs.map(s => segRowHTML(s)).join('')}
+        </div>
+        ${segs.length === 0
+          ? `<p id="segs-empty" style="text-align:center;padding:16px 0;color:var(--text-muted);font-size:12px;">
+               Sin tramos. Usa "＋ Agregar tramo" para definir la trayectoria.
+             </p>`
+          : ''}
+      </div>
+
+      <datalist id="providers-dl">
+        ${PROVIDERS.map(p => `<option value="${p}">`).join('')}
+      </datalist>
+
       <div id="f-lam-error" class="form-error" style="margin-top:12px;display:none;"></div>
     </div>
     <div class="modal-footer">
@@ -331,12 +380,24 @@ function openLambdaModal(lambda = null) {
     </div>
   `, async () => {
     const color = document.getElementById("f-lam-color").value.trim();
+
+    // Recoger filas de segmentos (solo las que tienen ambos sitios)
+    const segments = Array.from(
+      document.querySelectorAll('#f-lam-segments .seg-row')
+    ).map(row => ({
+      site_a_id:     row.querySelector('.seg-a').value,
+      site_b_id:     row.querySelector('.seg-b').value,
+      fiber:         row.querySelector('.seg-fiber').value,
+      fiber_provider: row.querySelector('.seg-provider').value.trim(),
+    })).filter(s => s.site_a_id && s.site_b_id);
+
     const body = {
-      name:                 document.getElementById("f-lam-name").value.trim(),
+      name:                  document.getElementById("f-lam-name").value.trim(),
       color,
-      num_lambdas:          parseInt(document.getElementById("f-lam-num").value) || 1,
-      capacity_per_lambda:  parseInt(document.getElementById("f-lam-cap").value) || 100,
+      num_lambdas:           parseInt(document.getElementById("f-lam-num").value) || 1,
+      capacity_per_lambda:   parseInt(document.getElementById("f-lam-cap").value) || 100,
       protection_route_name: document.getElementById("f-lam-prot").value.trim() || null,
+      segments,
     };
     const errEl = document.getElementById("f-lam-error");
     try {
@@ -351,12 +412,34 @@ function openLambdaModal(lambda = null) {
     }
   });
 
-  // Sync color pickers
   setTimeout(() => {
+    // Ampliar el modal para que quepan las columnas de segmentos
+    const modal = document.querySelector('#modal-overlay .modal');
+    if (modal) { modal.style.maxWidth = '880px'; modal.style.width = '95vw'; }
+
+    // Sync color pickers
     const picker = document.getElementById("f-lam-color-picker");
     const text   = document.getElementById("f-lam-color");
     picker?.addEventListener("input", () => { text.value = picker.value; });
-    text?.addEventListener("input", () => { if (/^#[0-9A-Fa-f]{6}$/.test(text.value)) picker.value = text.value; });
+    text?.addEventListener("input", () => {
+      if (/^#[0-9A-Fa-f]{6}$/.test(text.value)) picker.value = text.value;
+    });
+
+    // Eliminar fila (event delegation en el contenedor)
+    document.getElementById('f-lam-segments')?.addEventListener('click', e => {
+      if (e.target.closest('.seg-rm')) {
+        e.target.closest('.seg-row').remove();
+      }
+    });
+
+    // Agregar fila nueva
+    document.getElementById('btn-add-seg')?.addEventListener('click', () => {
+      document.getElementById('segs-empty')?.remove();
+      const container = document.getElementById('f-lam-segments');
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = segRowHTML(null);
+      container.appendChild(wrapper.firstElementChild);
+    });
   }, 50);
 }
 

@@ -94,6 +94,8 @@ def get_segment_usage():
             "label":            label,
             "site_a_id":        seg.site_a_id,
             "site_b_id":        seg.site_b_id,
+            "site_a_name":      seg.site_a.name if seg.site_a else seg.site_a_id,
+            "site_b_name":      seg.site_b.name if seg.site_b else seg.site_b_id,
             "fiber":            seg.fiber,
             "fiber_provider":   seg.fiber_provider,
             "usage_count":      seg.usage_count,

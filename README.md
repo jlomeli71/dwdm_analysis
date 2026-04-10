@@ -32,10 +32,10 @@ La base de datos SQLite (`dwdm.db`) se crea con los 30 sitios y 22 lambdas del R
 
 ```bash
 cd frontend
-python -m http.server 8080
+python -m http.server 8080 --bind 127.0.0.1
 ```
 
-Abrir en el navegador: **http://localhost:8080**
+Abrir en el navegador: **http://127.0.0.1:8080**
 
 > Los módulos ES (`type="module"`) requieren servirse via HTTP, no como `file://`.
 

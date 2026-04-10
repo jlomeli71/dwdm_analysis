@@ -5,7 +5,15 @@
 import { API } from './api.js';
 
 let allSegments = [];
-let lastResult = null;
+let lastResult  = null;
+let _simLabel   = 'id'; // 'id' | 'name'
+
+/** Etiqueta de un segmento según el modo activo. */
+function segLabel(s) {
+  return _simLabel === 'name'
+    ? `${s.site_a_name} ↔ ${s.site_b_name}`
+    : `${s.site_a_id} ↔ ${s.site_b_id}`;
+}
 
 export async function renderSimulation(container) {
   container.innerHTML = `
@@ -13,6 +21,10 @@ export async function renderSimulation(container) {
       <div>
         <div class="page-title">Simulador de Fallas</div>
         <div class="page-subtitle">Análisis de impacto — Solo lectura, no modifica la base de datos</div>
+      </div>
+      <div class="topo-toggle" id="sim-label-toggle">
+        <button data-label="id"   class="${_simLabel==='id'   ? 'active' : ''}">Site ID</button>
+        <button data-label="name" class="${_simLabel==='name' ? 'active' : ''}">Nombre</button>
       </div>
     </div>
 
@@ -37,7 +49,7 @@ export async function renderSimulation(container) {
             <input type="text" id="sim-seg-search" placeholder="Buscar sitio o proveedor…" style="margin-bottom:8px;">
           </div>
           <div class="form-group">
-            <label>Segmentos seleccionados <span id="sel-count" style="color:var(--accent-blue)">(0/2)</span></label>
+            <label>Segmentos seleccionados <span id="sel-count" style="color:var(--accent-blue)">(0/3)</span></label>
             <div id="selected-segs" class="selected-segs-box"></div>
           </div>
           <div class="form-group">
@@ -70,7 +82,7 @@ export async function renderSimulation(container) {
           <div class="empty-state">
             <div style="font-size:48px;margin-bottom:12px">⚡</div>
             <div>Configure una falla y presione <b>Simular</b></div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:8px">Puede seleccionar hasta 2 segmentos simultáneos o un proveedor completo</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:8px">Puede seleccionar hasta 3 segmentos simultáneos o un proveedor completo</div>
           </div>
         </div>
       </div>
@@ -90,6 +102,21 @@ export async function renderSimulation(container) {
   });
 
   renderSegList('');
+
+  // Toggle Site ID / Nombre
+  document.getElementById('sim-label-toggle').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-label]');
+    if (!btn || btn.dataset.label === _simLabel) return;
+    _simLabel = btn.dataset.label;
+    document.querySelectorAll('#sim-label-toggle button').forEach(b =>
+      b.classList.toggle('active', b.dataset.label === _simLabel)
+    );
+    const filter = document.getElementById('sim-seg-search')?.value.toLowerCase() || '';
+    renderSegList(filter);
+    renderSelectedSegs();
+    if (lastResult) renderResults(lastResult,
+      document.querySelector('#sim-mode-toggle button.active')?.dataset.mode);
+  });
 
   // Toggle de modo
   document.getElementById('sim-mode-toggle').addEventListener('click', e => {
@@ -131,26 +158,30 @@ function renderSegList(filter) {
     return (
       s.site_a_id?.toLowerCase().includes(filter) ||
       s.site_b_id?.toLowerCase().includes(filter) ||
+      s.site_a_name?.toLowerCase().includes(filter) ||
+      s.site_b_name?.toLowerCase().includes(filter) ||
       s.fiber_provider?.toLowerCase().includes(filter) ||
       s.fiber?.toLowerCase().includes(filter)
     );
   });
 
-  list.innerHTML = filtered.slice(0, 50).map(s => `
-    <div class="seg-item ${selectedSegIds.includes(s.id) ? 'selected' : ''}"
+  list.innerHTML = filtered.slice(0, 50).map(s => {
+    const sel = selectedSegIds.includes(s.id);
+    return `
+    <div class="seg-item ${sel ? 'selected' : ''}"
          data-id="${s.id}"
          style="cursor:pointer;padding:8px 10px;border-radius:6px;margin-bottom:4px;
-                border:1px solid ${selectedSegIds.includes(s.id) ? 'var(--accent-blue)' : 'transparent'};
-                background:${selectedSegIds.includes(s.id) ? 'rgba(45,139,255,0.08)' : 'var(--bg-card)'};
+                border:1px solid ${sel ? 'var(--accent-blue)' : 'transparent'};
+                background:${sel ? 'rgba(45,139,255,0.08)' : 'var(--bg-card)'};
                 transition:all 0.15s;">
       <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent-cyan)">
-        ${s.site_a_id} ↔ ${s.site_b_id}
+        ${segLabel(s)}
       </div>
       <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
         ${s.fiber} · ${s.fiber_provider || '—'} · <span style="color:${s.usage_count >= 77 ? 'var(--accent-red)' : 'var(--text-muted)'}">${s.usage_count}/96 λ</span>
       </div>
-    </div>
-  `).join('') || '<div style="color:var(--text-muted);font-size:12px;padding:8px">Sin resultados</div>';
+    </div>`;
+  }).join('') || '<div style="color:var(--text-muted);font-size:12px;padding:8px">Sin resultados</div>';
 
   list.querySelectorAll('.seg-item').forEach(el => {
     el.addEventListener('click', () => toggleSeg(+el.dataset.id));
@@ -161,7 +192,7 @@ function toggleSeg(id) {
   if (selectedSegIds.includes(id)) {
     selectedSegIds = selectedSegIds.filter(x => x !== id);
   } else {
-    if (selectedSegIds.length >= 2) return; // máximo 2
+    if (selectedSegIds.length >= 3) return; // máximo 3
     selectedSegIds.push(id);
   }
   renderSelectedSegs();
@@ -174,7 +205,7 @@ function renderSelectedSegs() {
   const box = document.getElementById('selected-segs');
   if (!box) return;
   const count = document.getElementById('sel-count');
-  count && (count.textContent = `(${selectedSegIds.length}/2)`);
+  count && (count.textContent = `(${selectedSegIds.length}/3)`);
 
   if (selectedSegIds.length === 0) {
     box.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Ninguno seleccionado</span>';
@@ -185,7 +216,7 @@ function renderSelectedSegs() {
     return s ? `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;
                   background:rgba(45,139,255,0.1);border-radius:6px;margin-bottom:4px;border:1px solid var(--accent-blue)">
-        <span style="font-family:var(--font-mono);font-size:11px">${s.site_a_id} ↔ ${s.site_b_id} <span style="color:var(--text-muted)">(${s.fiber})</span></span>
+        <span style="font-family:var(--font-mono);font-size:11px">${segLabel(s)} <span style="color:var(--text-muted)">(${s.fiber})</span></span>
         <button onclick="window._removeSeg(${id})" style="background:none;border:none;color:var(--accent-red);cursor:pointer;font-size:14px">✕</button>
       </div>
     ` : '';
@@ -284,7 +315,7 @@ function renderResults(result, mode) {
       <div style="display:flex;flex-wrap:wrap;gap:8px;">
         ${result.failed_segments.map(s => `
           <span class="badge" style="background:rgba(255,107,107,0.15);color:var(--accent-red);font-family:var(--font-mono);font-size:11px">
-            ${s.site_a_id} ↔ ${s.site_b_id} (${s.fiber}) · ${s.fiber_provider || '—'}
+            ${segLabel(s)} (${s.fiber}) · ${s.fiber_provider || '—'}
           </span>
         `).join('')}
       </div>

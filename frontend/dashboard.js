@@ -7,9 +7,20 @@ import { API } from './api.js';
 // Instancias de Chart.js para poder destruirlas al re-renderizar
 let chartBar = null, chartBar2 = null, chartPie = null;
 
+// Caché de datos y modo de etiqueta actual
+let _cachedKpis = null, _cachedSeg = null, _cachedProv = null;
+let _dashLabel = 'id'; // 'id' | 'name'
+
 function destroyCharts() {
   [chartBar, chartBar2, chartPie].forEach(c => c && c.destroy());
   chartBar = chartBar2 = chartPie = null;
+}
+
+/** Devuelve la etiqueta de un segmento según el modo activo. */
+function segLabel(s) {
+  return _dashLabel === 'name'
+    ? `${s.site_a_name} ↔ ${s.site_b_name}`
+    : `${s.site_a_id} ↔ ${s.site_b_id}`;
 }
 
 export async function renderDashboard(container) {
@@ -21,48 +32,72 @@ export async function renderDashboard(container) {
         <div class="page-title">Dashboard de Red</div>
         <div class="page-subtitle">Métricas en tiempo real — Red ISP Tx</div>
       </div>
-      <button class="btn btn-secondary" id="btn-refresh-dash">↻ Actualizar</button>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <div class="topo-toggle" id="dash-label-toggle">
+          <button data-label="id"  class="${_dashLabel==='id'  ? 'active' : ''}">Site ID</button>
+          <button data-label="name" class="${_dashLabel==='name' ? 'active' : ''}">Nombre</button>
+        </div>
+        <button class="btn btn-secondary" id="btn-refresh-dash">↻ Actualizar</button>
+      </div>
     </div>
     <div id="dash-inner">
       <div class="loading-spinner"><div class="spinner"></div><span>Cargando métricas…</span></div>
     </div>
   `;
 
-  document.getElementById('btn-refresh-dash').addEventListener('click', () => loadDash());
-  await loadDash();
+  document.getElementById('btn-refresh-dash').addEventListener('click', () => loadDash(true));
+
+  document.getElementById('dash-label-toggle').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-label]');
+    if (!btn || btn.dataset.label === _dashLabel) return;
+    _dashLabel = btn.dataset.label;
+    document.querySelectorAll('#dash-label-toggle button').forEach(b =>
+      b.classList.toggle('active', b.dataset.label === _dashLabel)
+    );
+    // Re-renderizar desde caché sin refetch
+    if (_cachedKpis) renderFromCache();
+  });
+
+  await loadDash(true);
 }
 
-async function loadDash() {
+async function loadDash(forceRefetch = false) {
   const inner = document.getElementById('dash-inner');
   if (!inner) return;
 
   try {
-    const [kpis, segUsage, providers] = await Promise.all([
-      API.getKPIs(),
-      API.getSegmentUsage(),
-      API.getProviders(),
-    ]);
-
-    inner.innerHTML = buildDashHTML(kpis, segUsage, providers);
-    renderCharts(segUsage, providers);
-
-    // Alertas de capacidad
-    const alertSegs = segUsage.filter(s => s.is_overloaded);
-    if (alertSegs.length > 0) {
-      const alertBanner = document.getElementById('alert-banner');
-      if (alertBanner) {
-        alertBanner.style.display = 'flex';
-        alertBanner.querySelector('.alert-count').textContent = alertSegs.length;
-      }
+    if (forceRefetch || !_cachedKpis) {
+      [_cachedKpis, _cachedSeg, _cachedProv] = await Promise.all([
+        API.getKPIs(),
+        API.getSegmentUsage(),
+        API.getProviders(),
+      ]);
     }
+    renderFromCache();
   } catch (err) {
     inner.innerHTML = `<div class="error-state">Error al cargar datos: ${err.message || err.error || ''}</div>`;
   }
 }
 
+function renderFromCache() {
+  const inner = document.getElementById('dash-inner');
+  if (!inner || !_cachedKpis) return;
+  destroyCharts();
+  inner.innerHTML = buildDashHTML(_cachedKpis, _cachedSeg, _cachedProv);
+  renderCharts(_cachedSeg, _cachedProv);
+
+  const alertSegs = _cachedSeg.filter(s => s.is_overloaded);
+  const alertBanner = document.getElementById('alert-banner');
+  if (alertBanner) {
+    alertBanner.style.display = alertSegs.length > 0 ? 'flex' : 'none';
+    const cnt = alertBanner.querySelector('.alert-count');
+    if (cnt) cnt.textContent = alertSegs.length;
+  }
+}
+
 function buildDashHTML(kpis, segUsage, providers) {
   const alertSegs = segUsage.filter(s => s.is_overloaded);
-  const top10 = segUsage.slice(0, 10);
+  const top10     = segUsage.slice(0, 10);
 
   return `
     <!-- Alerta global -->
@@ -146,7 +181,7 @@ function buildDashHTML(kpis, segUsage, providers) {
           <tbody>
             ${top10.map(s => `
               <tr>
-                <td><code style="font-size:11px;color:var(--accent-cyan)">${s.site_a_id} ↔ ${s.site_b_id}</code></td>
+                <td><code style="font-size:11px;color:var(--accent-cyan)">${segLabel(s)}</code></td>
                 <td><span class="badge" style="background:rgba(45,139,255,0.15);color:var(--accent-blue)">${s.fiber}</span></td>
                 <td>${s.fiber_provider || '—'}</td>
                 <td style="text-align:right;font-weight:600">${s.usage_count}</td>
@@ -171,8 +206,8 @@ function buildDashHTML(kpis, segUsage, providers) {
 }
 
 function renderCharts(segUsage, providers) {
-  const top10 = segUsage.slice(0, 10);
-  const labels = top10.map(s => `${s.site_a_id}↔${s.site_b_id}\n(${s.fiber})`);
+  const top10  = segUsage.slice(0, 10);
+  const labels = top10.map(s => `${segLabel(s)}\n(${s.fiber})`);
   const lambdaCounts = top10.map(s => s.usage_count);
   const capGbps = top10.map(s => s.capacity_gbps);
   const bgColors = top10.map(s => s.is_overloaded ? 'rgba(255,107,107,0.7)' : 'rgba(45,139,255,0.65)');
