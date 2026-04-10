@@ -26,7 +26,7 @@ python run.py
 ```
 
 El backend arranca en `http://localhost:5001`.
-La base de datos SQLite (`dwdm.db`) se crea con los 30 sitios y 22 lambdas del Proyecto Philadelphia.
+La base de datos SQLite (`dwdm.db`) se crea con los 30 sitios y 22 lambdas del Red ISP Tx.
 
 ### Frontend (Servidor HTTP — Puerto 8080)
 
@@ -104,10 +104,15 @@ GET    /api/v1/reports/segments.csv      CSV de segmentos
 
 ### Mapa Geográfico
 - Contorno real del territorio mexicano renderizado con D3 `geoMercator` + GeoJSON de Natural Earth (archivo local `mexico.geojson`, 174 puntos)
-- Los 30 sitios se posicionan en sus coordenadas reales (lat/lon)
+- Los 30 sitios se posicionan según coordenadas lat/lon almacenadas en la base de datos
 - Misma visualización de **líneas paralelas por lambda** que el grafo lógico
 - Sitios sin coordenadas aparecen en panel lateral "Sin ubicar"
-- Zoom y pan con scroll/drag; botón "Centrar México"
+- Zoom y pan con scroll/drag; botones de zoom y ajuste a pantalla
+- Los nodos son arrastrables — al soltar, las coordenadas se pueden guardar en la BD con el botón "💾 Guardar posiciones"
+
+> **Nota:** Las coordenadas geográficas son **aproximadas** y pueden estar ajustadas
+> intencionalmente para evitar solapamiento visual entre sitios cercanos en el mapa.
+> No deben usarse como referencia de ubicación exacta.
 
 ### Selección múltiple de lambdas
 - Clic en cualquier lambda del panel lateral la **agrega o quita** de la selección (sin límite)

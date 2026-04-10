@@ -19,7 +19,7 @@ export async function renderDashboard(container) {
     <div class="page-header">
       <div>
         <div class="page-title">Dashboard de Red</div>
-        <div class="page-subtitle">Métricas en tiempo real — Proyecto Philadelphia</div>
+        <div class="page-subtitle">Métricas en tiempo real — Red ISP Tx</div>
       </div>
       <button class="btn btn-secondary" id="btn-refresh-dash">↻ Actualizar</button>
     </div>

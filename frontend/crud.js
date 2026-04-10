@@ -38,7 +38,7 @@ export async function renderCrud(container) {
     <div class="page-header">
       <div>
         <div class="page-title">Gestión de Sitios y Lambdas</div>
-        <div class="page-subtitle">CRUD completo — Proyecto Philadelphia</div>
+        <div class="page-subtitle">CRUD completo — Red ISP Tx</div>
       </div>
     </div>
 

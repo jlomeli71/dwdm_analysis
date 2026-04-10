@@ -167,7 +167,7 @@ def general_pdf():
     story = []
 
     # Título
-    story.append(Paragraph("Reporte DWDM — Proyecto Philadelphia", styles["Title"]))
+    story.append(Paragraph("Reporte DWDM — Red ISP Tx", styles["Title"]))
     story.append(Spacer(1, 0.5*cm))
 
     # KPIs

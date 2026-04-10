@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DWDM Topology — Proyecto Philadelphia</title>
-  <meta name="description" content="Aplicación de gestión y visualización de topología DWDM para ISP México — Proyecto Philadelphia" />
+  <title>DWDM Topology — Red ISP Tx</title>
+  <meta name="description" content="Aplicación de gestión y visualización de topología DWDM para ISP México — Red ISP Tx" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <!-- D3.js para grafo de topología -->
@@ -23,7 +23,7 @@
       <span class="logo-icon">⬡</span>
       <div>
         <div class="logo-title">DWDM</div>
-        <div class="logo-sub">Proyecto Philadelphia</div>
+        <div class="logo-sub">Red ISP Tx</div>
       </div>
     </div>
 
@@ -47,6 +47,10 @@
       <a class="nav-item" data-page="reports" href="#reports">
         <span class="nav-icon">📄</span>
         <span class="nav-label">Reportes</span>
+      </a>
+      <a class="nav-item nav-item--external" id="nav-admin-db" href="#" target="_blank" rel="noopener" title="Abrir explorador de base de datos en nueva pestaña">
+        <span class="nav-icon">🗃</span>
+        <span class="nav-label">Admin BD</span>
       </a>
     </nav>
 
@@ -109,6 +113,10 @@
 
     window.addEventListener('hashchange', () => navigate(getPage()));
     navigate(getPage());
+
+    // Enlace Admin BD — apunta al /admin del backend (mismo host, puerto 5001)
+    document.getElementById('nav-admin-db').href =
+      `${location.protocol}//${location.hostname}:5001/admin`;
 
     // ── Toggle de tema claro / oscuro ───────────────────────
     const themeBtn   = document.getElementById('theme-toggle');

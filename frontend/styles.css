@@ -125,6 +125,8 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   border: 1px solid transparent;
 }
 .nav-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.nav-item--external { border-color: rgba(180, 180, 180, 0.15); opacity: 0.75; }
+.nav-item--external:hover { opacity: 1; border-color: rgba(180, 180, 180, 0.3); }
 .nav-item.active {
   background: rgba(45, 139, 255, 0.12);
   color: var(--accent-blue);
@@ -345,6 +347,74 @@ label { font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-
 .topo-toggle button.active {
   background: var(--accent-blue); color: white;
 }
+
+/* Toast notifications */
+.toast {
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  animation: toast-in .2s ease;
+}
+.toast-success { border-color: rgba(0,200,120,.5); color: #00c878; }
+.toast-error   { border-color: rgba(255,80,80,.5);  color: #ff5050; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* Botón de herramienta activa (toggle on/off) */
+.btn.active-tool {
+  background: rgba(45, 139, 255, 0.15);
+  border-color: rgba(45, 139, 255, 0.4);
+  color: var(--accent-blue);
+}
+
+/* Zoom controls */
+.zoom-controls {
+  display: flex;
+  gap: 2px;
+}
+.zoom-controls .btn {
+  padding: 6px 10px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* Export dropdown */
+.export-dropdown-wrap { position: relative; }
+.export-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 300;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 195px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  flex-direction: column;
+}
+.export-menu.open { display: flex; }
+.export-menu button {
+  padding: 8px 12px;
+  text-align: left;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--tr), color var(--tr);
+}
+.export-menu button:hover { background: var(--bg-card-hover); color: var(--text-primary); }
 
 #topology-svg {
   width: 100%; height: calc(100vh - var(--nav-h) - 120px);

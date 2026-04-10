@@ -1,5 +1,5 @@
 """
-Seed data — Carga inicial de sitios y lambdas del Proyecto Philadelphia.
+Seed data — Carga inicial de sitios y lambdas del Red ISP Tx.
 Datos extraídos directamente del CLAUDE.md.
 """
 from .extensions import db
@@ -332,26 +332,7 @@ def _canonical(site_a: str, site_b: str):
 
 
 def seed_database():
-    """Carga los datos iniciales en la base de datos si está vacía.
-    Las coordenadas (lat/lon) siempre se sincronizan desde SITE_ID_TO_NAME.
-    """
-
-    # Sincronizar coordenadas siempre (permite ajustar el mapa sin borrar la BD)
-    updated = 0
-    for site_id, info in SITE_ID_TO_NAME.items():
-        site = db.session.get(Site, site_id)
-        if site and (site.lat != info.get("lat") or site.lon != info.get("lon")):
-            site.lat = info.get("lat")
-            site.lon = info.get("lon")
-            updated += 1
-    if updated:
-        db.session.commit()
-        print(f"[Seed] Coordenadas actualizadas para {updated} sitio(s).")
-
-    if Site.query.count() > 0:
-        print("[Seed] Base de datos ya tiene datos. Se omite el seeding completo.")
-        return
-
+    """Carga los datos iniciales en la base de datos (solo se invoca cuando la BD es nueva)."""
     print("[Seed] Insertando sitios...")
 
     # Insertar sitios
