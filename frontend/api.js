@@ -47,4 +47,13 @@ export const API = {
 
   // Reports (returns URL for download)
   reportUrl: name => `${BASE}/reports/${name}`,
+
+  // ISP Layer
+  getRouters:               ()         => request("GET", "/routers"),
+  updateRouterInterface:    (id, body) => request("PUT", `/router-interfaces/${id}`, body),
+  getISPProviders:       ()         => request("GET", "/isp-providers"),
+  getTrafficFlows:       ()         => request("GET", "/traffic-flows"),
+  updateTrafficFlow:     (id, body) => request("PUT", `/traffic-flows/${id}`, body),
+  simulateISPProvider:   body       => request("POST", "/simulation/isp-provider", body),
+  simulateLambdaTraffic: body       => request("POST", "/simulation/lambda-traffic", body),
 };

@@ -8,6 +8,7 @@ def register_blueprints(app):
     from .dashboard import bp as dashboard_bp
     from .simulation import bp as simulation_bp
     from .reports import bp as reports_bp
+    from .isp import bp as isp_bp
 
     prefix = "/api/v1"
     app.register_blueprint(sites_bp, url_prefix=prefix)
@@ -16,3 +17,4 @@ def register_blueprints(app):
     app.register_blueprint(dashboard_bp, url_prefix=prefix)
     app.register_blueprint(simulation_bp, url_prefix=prefix)
     app.register_blueprint(reports_bp, url_prefix=prefix)
+    app.register_blueprint(isp_bp, url_prefix=prefix)

@@ -52,6 +52,14 @@
         <span class="nav-icon">🗃</span>
         <span class="nav-label">Admin BD</span>
       </a>
+      <a class="nav-item" data-page="isp" href="#isp">
+        <span class="nav-icon">🌐</span>
+        <span class="nav-label">Capa IP/ISP</span>
+      </a>
+      <a class="nav-item" data-page="help" href="#help">
+        <span class="nav-icon">?</span>
+        <span class="nav-label">Ayuda</span>
+      </a>
     </nav>
 
     <button id="theme-toggle" title="Modo claro"><span id="theme-icon">☀️</span><span id="theme-label">Claro</span></button>
@@ -76,6 +84,8 @@
     import { renderDashboard }  from './dashboard.js';
     import { renderSimulation } from './simulation.js';
     import { renderReports }    from './reports.js';
+    import { renderHelp }       from './help.js';
+    import { renderISPLayer }   from './isp_layer.js';
 
     const pages = {
       topology:   renderTopology,
@@ -83,6 +93,8 @@
       dashboard:  renderDashboard,
       simulation: renderSimulation,
       reports:    renderReports,
+      help:       renderHelp,
+      isp:        renderISPLayer,
     };
 
     const container = document.getElementById('page-container');

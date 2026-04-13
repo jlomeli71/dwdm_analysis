@@ -80,6 +80,7 @@ export async function renderTopology(container) {
           <button data-fmt="dot">🔵&nbsp; DOT (Graphviz)</button>
         </div>
       </div>
+      <button class="btn btn-secondary btn-sm" id="btn-isp-layer" title="Mostrar/ocultar ruteadores y proveedores ISP">🌐 Capa IP</button>
       <span id="topo-status" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
     </div>
 
@@ -173,6 +174,106 @@ export async function renderTopology(container) {
     updateLambdaSidebarTitle();
     updateHighlights();
   });
+
+  // ── Toggle Capa IP ──────────────────────────────────────────────────────────
+  let ispLayerActive = false;
+  let ispRouters = null;
+  const btnISP = document.getElementById("btn-isp-layer");
+  btnISP?.addEventListener("click", async () => {
+    ispLayerActive = !ispLayerActive;
+    btnISP.classList.toggle("active-tool", ispLayerActive);
+    if (ispLayerActive) {
+      if (!ispRouters) {
+        try { ispRouters = await (await import("./api.js")).API.getRouters(); } catch { ispRouters = []; }
+      }
+      _renderISPOverlay(ispRouters);
+    } else {
+      document.getElementById("isp-overlay-g")?.remove();
+      document.querySelectorAll(".isp-cloud-node").forEach(n => n.remove());
+    }
+  });
+
+  function _renderISPOverlay(rtrData) {
+    // Eliminar overlay previo
+    document.getElementById("isp-overlay-g")?.remove();
+    const svgEl = document.getElementById("topology-svg");
+    const gEl   = document.querySelector("#topology-svg .topo-root, #topology-svg > g");
+    if (!svgEl || !gEl) return;
+
+    const BRAND_COLOR = { cisco: "#2563EB", juniper: "#16A34A", cirion: "#8B5CF6" };
+    const overG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    overG.setAttribute("id", "isp-overlay-g");
+    overG.setAttribute("pointer-events", "none");
+    gEl.appendChild(overG);
+
+    // Mapear site_id → nodo D3 (posición actual)
+    const nodeEls = gEl.querySelectorAll(".node");
+    const sitePos = {};
+    nodeEls.forEach(el => {
+      const transform = el.getAttribute("transform") || "";
+      const m = transform.match(/translate\(([-\d.]+),\s*([-\d.]+)\)/);
+      if (m) {
+        const datum = el.__data__;
+        if (datum?.id) sitePos[datum.id] = { x: +m[1], y: +m[2] };
+      }
+    });
+
+    rtrData.forEach(rtr => {
+      const pos = sitePos[rtr.site_id];
+      if (!pos) return;
+      const color = BRAND_COLOR[rtr.brand] || "#888";
+      const arm = 7;
+      // Círculo + cruz sobre el nodo
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", pos.x); circle.setAttribute("cy", pos.y);
+      circle.setAttribute("r", "10"); circle.setAttribute("fill", color);
+      circle.setAttribute("stroke", "#fff"); circle.setAttribute("stroke-width", "1.5");
+      circle.setAttribute("opacity", "0.9");
+      overG.appendChild(circle);
+      ["h","v"].forEach(dir => {
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        if (dir === "h") { line.setAttribute("x1", pos.x - arm); line.setAttribute("y1", pos.y); line.setAttribute("x2", pos.x + arm); line.setAttribute("y2", pos.y); }
+        else             { line.setAttribute("x1", pos.x); line.setAttribute("y1", pos.y - arm); line.setAttribute("x2", pos.x); line.setAttribute("y2", pos.y + arm); }
+        line.setAttribute("stroke", "#fff"); line.setAttribute("stroke-width", "2");
+        line.setAttribute("stroke-linecap", "round");
+        overG.appendChild(line);
+      });
+
+      // Nubes ISP cercanas al nodo
+      const ispIfaces = rtr.interfaces.filter(i => i.iface_type === "isp");
+      const seenProv = new Set();
+      ispIfaces.forEach((iface, idx) => {
+        if (seenProv.has(iface.isp_provider_id)) return;
+        seenProv.add(iface.isp_provider_id);
+        const angle = (idx / (seenProv.size + 2)) * Math.PI * 2 - Math.PI / 2;
+        const dist  = 42;
+        const cx = pos.x + Math.cos(angle) * dist;
+        const cy = pos.y + Math.sin(angle) * dist;
+        // Línea
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", pos.x); line.setAttribute("y1", pos.y);
+        line.setAttribute("x2", cx); line.setAttribute("y2", cy);
+        line.setAttribute("stroke", iface.isp_provider_color || "#888");
+        line.setAttribute("stroke-width", "1.5"); line.setAttribute("stroke-dasharray", "3,2");
+        line.setAttribute("opacity", "0.7");
+        overG.appendChild(line);
+        // Elipse nube mini
+        const ell = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+        ell.setAttribute("cx", cx); ell.setAttribute("cy", cy);
+        ell.setAttribute("rx", "14"); ell.setAttribute("ry", "9");
+        ell.setAttribute("fill", iface.isp_provider_color || "#888"); ell.setAttribute("fill-opacity", "0.22");
+        ell.setAttribute("stroke", iface.isp_provider_color || "#888"); ell.setAttribute("stroke-width", "1.5");
+        overG.appendChild(ell);
+        // Label
+        const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        txt.setAttribute("x", cx); txt.setAttribute("y", cy + 3);
+        txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", "6");
+        txt.setAttribute("fill", iface.isp_provider_color || "#888"); txt.setAttribute("font-weight", "700");
+        txt.textContent = (iface.isp_provider_name || "ISP").substring(0, 6);
+        overG.appendChild(txt);
+      });
+    });
+  }
 
   // ── Export dropdown ─────────────────────────────────────────────────────────
   const btnExport  = document.getElementById("btn-export");
@@ -1083,6 +1184,15 @@ async function exportAsPDF() {
   setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
 }
 
+function escapeXml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 function exportAsGraphML() {
   if (!graphNodes.length) return;
   const SCALE = 1.5;
@@ -1106,12 +1216,12 @@ function exportAsGraphML() {
     const shape = n.type === "own" ? "ellipse"  : "rectangle";
     lines.push(
       `    <node id="${n.id}">`,
-      `      <data key="nD">${n.region || ""} | ${n.city || ""}</data>`,
+      `      <data key="nD">${escapeXml(n.region || "")} | ${escapeXml(n.city || "")}</data>`,
       `      <data key="nG"><y:ShapeNode>`,
       `        <y:Geometry x="${x}" y="${y}" width="120" height="50"/>`,
       `        <y:Fill color="${fill}" transparent="false"/>`,
       `        <y:BorderStyle type="line" width="2.0" color="#FFFFFF"/>`,
-      `        <y:NodeLabel alignment="center" fontFamily="Arial" fontSize="11" textColor="#FFFFFF">${n.name}&#10;${n.id}</y:NodeLabel>`,
+      `        <y:NodeLabel alignment="center" fontFamily="Arial" fontSize="11" textColor="#FFFFFF">${escapeXml(n.name)}&#10;${escapeXml(n.id)}</y:NodeLabel>`,
       `        <y:Shape type="${shape}"/>`,
       `      </y:ShapeNode></data>`,
       `    </node>`,
@@ -1127,7 +1237,7 @@ function exportAsGraphML() {
       `      <data key="eG"><y:PolyLineEdge>`,
       `        <y:LineStyle type="line" width="2.0" color="#2D8BFF"/>`,
       `        <y:Arrows source="none" target="none"/>`,
-      prov ? `        <y:EdgeLabel>${prov}</y:EdgeLabel>` : "",
+      prov ? `        <y:EdgeLabel>${escapeXml(prov)}</y:EdgeLabel>` : "",
       `      </y:PolyLineEdge></data>`,
       `    </edge>`,
     );

@@ -21,6 +21,7 @@ class Site(db.Model):
                                   back_populates="site_a", lazy="dynamic")
     segments_b = db.relationship("Segment", foreign_keys="Segment.site_b_id",
                                   back_populates="site_b", lazy="dynamic")
+    router = db.relationship("Router", back_populates="site", uselist=False)
 
     def to_dict(self):
         return {
@@ -145,4 +146,117 @@ class LambdaSegment(db.Model):
             "fiber": self.segment.fiber,
             "fiber_provider": self.segment.fiber_provider,
             "order_index": self.order_index,
+        }
+
+
+# ── Capa IP / ISP ─────────────────────────────────────────────────────────────
+
+class ISPProvider(db.Model):
+    """Proveedor de servicio de Internet (tránsito/peering)."""
+    __tablename__ = "isp_providers"
+
+    id    = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name  = db.Column(db.String(100), unique=True, nullable=False)
+    color = db.Column(db.String(7), nullable=False)   # hex color para visualización
+
+    interfaces   = db.relationship("RouterInterface", back_populates="isp_provider")
+    traffic_flows = db.relationship("TrafficFlow", back_populates="isp_provider")
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "color": self.color}
+
+
+class Router(db.Model):
+    """Ruteador IP asociado a un sitio de la red."""
+    __tablename__ = "routers"
+
+    id      = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    site_id = db.Column(db.String(50), db.ForeignKey("sites.id"), unique=True, nullable=False)
+    name    = db.Column(db.String(100), nullable=False)   # ej: RTR-MSOTOL01-01
+    brand   = db.Column(db.String(20),  nullable=False)   # cisco | juniper | cirion
+
+    site       = db.relationship("Site", back_populates="router")
+    interfaces = db.relationship("RouterInterface", back_populates="router",
+                                  cascade="all, delete-orphan", order_by="RouterInterface.id")
+
+    def to_dict(self, include_interfaces=False):
+        d = {
+            "id": self.id,
+            "site_id": self.site_id,
+            "site_name": self.site.name if self.site else None,
+            "name": self.name,
+            "brand": self.brand,
+        }
+        if include_interfaces:
+            d["interfaces"] = [i.to_dict() for i in self.interfaces]
+        return d
+
+
+class RouterInterface(db.Model):
+    """Interfaz de un ruteador (100 Gbps). Puede conectar a una lambda o a un proveedor ISP."""
+    __tablename__ = "router_interfaces"
+
+    id              = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    router_id       = db.Column(db.Integer, db.ForeignKey("routers.id"), nullable=False)
+    name            = db.Column(db.String(50), nullable=False)   # ej: xe-0/0/0
+    iface_type      = db.Column(db.String(20), nullable=False)   # lambda | isp
+    capacity_gbps   = db.Column(db.Integer, default=100)
+    # Para interfaces conectadas a una lambda:
+    lambda_id       = db.Column(db.Integer, db.ForeignKey("lambdas.id"), nullable=True)
+    # Métrica ISIS (solo en interfaces lambda de routers Cisco/Juniper, default 10)
+    isis_metric     = db.Column(db.Integer, default=10, nullable=True)
+    # Para interfaces conectadas a un proveedor ISP:
+    isp_provider_id = db.Column(db.Integer, db.ForeignKey("isp_providers.id"), nullable=True)
+
+    router       = db.relationship("Router", back_populates="interfaces")
+    lambda_      = db.relationship("Lambda")
+    isp_provider = db.relationship("ISPProvider", back_populates="interfaces")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "router_id": self.router_id,
+            "name": self.name,
+            "iface_type": self.iface_type,
+            "capacity_gbps": self.capacity_gbps,
+            "lambda_id": self.lambda_id,
+            "lambda_name": self.lambda_.name if self.lambda_ else None,
+            "isis_metric": self.isis_metric,
+            "isp_provider_id": self.isp_provider_id,
+            "isp_provider_name": self.isp_provider.name if self.isp_provider else None,
+            "isp_provider_color": self.isp_provider.color if self.isp_provider else None,
+        }
+
+
+class TrafficFlow(db.Model):
+    """Flujo de tráfico de bajada entre un proveedor ISP (ingress) y un sitio MSO (egress).
+    La unidad es número de interfaces de 100 Gbps asignadas a este flujo.
+    """
+    __tablename__ = "traffic_flows"
+
+    id               = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    isp_provider_id  = db.Column(db.Integer, db.ForeignKey("isp_providers.id"), nullable=False)
+    ingress_site_id  = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
+    egress_site_id   = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
+    interfaces_count = db.Column(db.Integer, default=0)   # N × 100 Gbps
+    # Lambdas que transportan este flujo (CSV de nombres, para flujos multi-hop)
+    lambda_names     = db.Column(db.String(500), nullable=True)
+
+    isp_provider  = db.relationship("ISPProvider", back_populates="traffic_flows")
+    ingress_site  = db.relationship("Site", foreign_keys=[ingress_site_id])
+    egress_site   = db.relationship("Site", foreign_keys=[egress_site_id])
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "isp_provider_id": self.isp_provider_id,
+            "isp_provider_name": self.isp_provider.name if self.isp_provider else None,
+            "isp_provider_color": self.isp_provider.color if self.isp_provider else None,
+            "ingress_site_id": self.ingress_site_id,
+            "ingress_site_name": self.ingress_site.name if self.ingress_site else None,
+            "egress_site_id": self.egress_site_id,
+            "egress_site_name": self.egress_site.name if self.egress_site else None,
+            "interfaces_count": self.interfaces_count,
+            "capacity_gbps": self.interfaces_count * 100,
+            "lambda_names": self.lambda_names,
         }

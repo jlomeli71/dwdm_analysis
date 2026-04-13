@@ -5,14 +5,14 @@
 import { API } from './api.js';
 
 // Instancias de Chart.js para poder destruirlas al re-renderizar
-let chartBar = null, chartBar2 = null, chartPie = null;
+let chartBar = null, chartBar2 = null, chartPie = null, chartISP = null;
 
 // Caché de datos y modo de etiqueta actual
 let _cachedKpis = null, _cachedSeg = null, _cachedProv = null;
 let _dashLabel = 'id'; // 'id' | 'name'
 
 function destroyCharts() {
-  [chartBar, chartBar2, chartPie].forEach(c => c && c.destroy());
+  [chartBar, chartBar2, chartPie, chartISP].forEach(c => c && c.destroy());
   chartBar = chartBar2 = chartPie = null;
 }
 
@@ -74,6 +74,7 @@ async function loadDash(forceRefetch = false) {
       ]);
     }
     renderFromCache();
+    await renderISPSection(forceRefetch);
   } catch (err) {
     inner.innerHTML = `<div class="error-state">Error al cargar datos: ${err.message || err.error || ''}</div>`;
   }
@@ -308,4 +309,165 @@ function renderCharts(segUsage, providers) {
       },
     });
   }
+}
+
+// ── Sección Capa IP / ISP ─────────────────────────────────────────────────────
+let _cachedRouters = null, _cachedFlows = null, _cachedISPProv = null;
+
+async function renderISPSection(forceRefetch = false) {
+  const inner = document.getElementById('dash-inner');
+  if (!inner) return;
+
+  try {
+    if (forceRefetch || !_cachedRouters) {
+      [_cachedRouters, _cachedFlows, _cachedISPProv] = await Promise.all([
+        API.getRouters(),
+        API.getTrafficFlows(),
+        API.getISPProviders(),
+      ]);
+    }
+  } catch { return; }  // No bloquear el dashboard si la API ISP falla
+
+  const routers = _cachedRouters;
+  const flows   = _cachedFlows;
+  const isps    = _cachedISPProv;
+
+  // Calcular utilización por proveedor
+  const provUtil = {};  // provider_name → { total_ifaces, used_ifaces, color }
+  isps.forEach(p => { provUtil[p.name] = { total: 0, used: 0, color: p.color }; });
+  routers.forEach(r => {
+    r.interfaces.filter(i => i.iface_type === "isp").forEach(iface => {
+      const prov = isps.find(p => p.id === iface.isp_provider_id);
+      if (prov) provUtil[prov.name].total++;
+    });
+  });
+  flows.forEach(f => {
+    if (f.isp_provider_name && provUtil[f.isp_provider_name]) {
+      provUtil[f.isp_provider_name].used += f.interfaces_count;
+    }
+  });
+
+  // Utilización por sitio ingress
+  const siteUtil = {};  // site_id → { name, total, used, providers: [] }
+  routers.forEach(r => {
+    const ispIfaces = r.interfaces.filter(i => i.iface_type === "isp");
+    if (!ispIfaces.length) return;
+    if (!siteUtil[r.site_id]) siteUtil[r.site_id] = { name: r.site_name, total: 0, used: 0 };
+    siteUtil[r.site_id].total += ispIfaces.length;
+  });
+  flows.forEach(f => {
+    if (siteUtil[f.ingress_site_id]) {
+      siteUtil[f.ingress_site_id].used += f.interfaces_count;
+    }
+  });
+
+  const totalTrafficGbps = flows.reduce((s, f) => s + f.interfaces_count * 100, 0);
+  const totalCapGbps     = Object.values(provUtil).reduce((s, p) => s + p.total * 100, 0);
+
+  // Construir HTML
+  const section = document.createElement("div");
+  section.className = "dash-isp-section";
+  section.innerHTML = `
+    <div class="dash-section-title">🌐 Capa IP / ISP</div>
+    <div class="dash-isp-kpis">
+      <div class="kpi-card">
+        <div class="kpi-value">${isps.length}</div>
+        <div class="kpi-label">Proveedores ISP</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">${routers.length}</div>
+        <div class="kpi-label">Ruteadores</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">${(totalTrafficGbps / 1000).toFixed(1)} Tbps</div>
+        <div class="kpi-label">Tráfico configurado</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">${totalCapGbps > 0 ? Math.round((totalTrafficGbps / totalCapGbps) * 100) : 0}%</div>
+        <div class="kpi-label">Uso capacidad ISP</div>
+      </div>
+    </div>
+
+    <div class="dash-isp-body">
+      <!-- Utilización por proveedor -->
+      <div class="dash-card">
+        <div class="dash-card-title">Utilización por Proveedor ISP</div>
+        <div class="isp-prov-list">
+          ${Object.entries(provUtil).map(([name, p]) => {
+            const pct = p.total > 0 ? Math.round((p.used / p.total) * 100) : 0;
+            const barColor = pct >= 80 ? "var(--accent-red)" : pct >= 60 ? "var(--accent-orange)" : p.color;
+            return `<div class="isp-prov-row">
+              <span class="isp-prov-dot" style="background:${p.color}"></span>
+              <span class="isp-prov-name">${name}</span>
+              <div class="isp-prov-bar-wrap">
+                <div class="isp-prov-bar" style="width:${pct}%;background:${barColor}"></div>
+              </div>
+              <span class="isp-prov-stat">${p.used}/${p.total} ifaces</span>
+              <span class="isp-prov-pct" style="color:${barColor}">${pct}%</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+
+      <!-- Utilización por sitio -->
+      <div class="dash-card">
+        <div class="dash-card-title">Utilización por Sitio (Ingress)</div>
+        <table class="dash-table" style="width:100%">
+          <thead><tr>
+            <th>Sitio</th><th>Ifaces ISP</th><th>En uso</th><th>% Uso</th>
+          </tr></thead>
+          <tbody>
+            ${Object.entries(siteUtil).map(([sid, s]) => {
+              const pct = s.total > 0 ? Math.round((s.used / s.total) * 100) : 0;
+              const c = pct >= 80 ? "var(--accent-red)" : pct >= 60 ? "var(--accent-orange)" : "var(--accent-green)";
+              return `<tr>
+                <td>${s.name}</td>
+                <td style="text-align:center">${s.total}</td>
+                <td style="text-align:center">${s.used}</td>
+                <td style="color:${c};font-weight:600;text-align:center">${pct}%
+                  ${pct >= 80 ? '<span style="color:var(--accent-red)"> ⚠</span>' : ""}
+                </td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+  inner.appendChild(section);
+
+  // Gráfica de barras: tráfico por proveedor
+  const canvasWrap = document.createElement("div");
+  canvasWrap.className = "dash-card";
+  canvasWrap.style.marginTop = "16px";
+  canvasWrap.innerHTML = `<div class="dash-card-title">Capacidad ISP vs Tráfico Configurado (Gbps)</div>
+    <canvas id="chart-isp" height="80"></canvas>`;
+  inner.appendChild(canvasWrap);
+
+  const labels = Object.keys(provUtil);
+  const capData = labels.map(n => provUtil[n].total * 100);
+  const useData = labels.map(n => provUtil[n].used * 100);
+  const colors  = labels.map(n => provUtil[n].color);
+
+  chartISP = new Chart(document.getElementById("chart-isp"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Capacidad total (Gbps)", data: capData, backgroundColor: colors.map(c => c + "33"), borderColor: colors, borderWidth: 2 },
+        { label: "Tráfico configurado (Gbps)", data: useData, backgroundColor: colors.map(c => c + "99"), borderColor: colors, borderWidth: 2 },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: "#c9d4e0", font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y} Gbps` } },
+      },
+      scales: {
+        x: { ticks: { color: "#8899bb" }, grid: { color: "rgba(45,139,255,0.08)" } },
+        y: { ticks: { color: "#8899bb" }, grid: { color: "rgba(45,139,255,0.08)" }, beginAtZero: true },
+      },
+    },
+  });
 }
