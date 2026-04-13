@@ -188,90 +188,91 @@ export async function renderTopology(container) {
       }
       _renderISPOverlay(ispRouters);
     } else {
-      document.getElementById("isp-overlay-g")?.remove();
-      document.querySelectorAll(".isp-cloud-node").forEach(n => n.remove());
+      document.querySelectorAll(".router-isp-badge").forEach(el => el.remove());
     }
   });
 
   function _renderISPOverlay(rtrData) {
-    // Eliminar overlay previo
-    document.getElementById("isp-overlay-g")?.remove();
-    const svgEl = document.getElementById("topology-svg");
-    const gEl   = document.querySelector("#topology-svg .topo-root, #topology-svg > g");
-    if (!svgEl || !gEl) return;
+    // Eliminar badges previos (inyectados como hijos de cada .node-group)
+    document.querySelectorAll(".router-isp-badge").forEach(el => el.remove());
 
-    const BRAND_COLOR = { cisco: "#2563EB", juniper: "#16A34A", cirion: "#8B5CF6" };
-    const overG = document.createElementNS("http://www.w3.org/2000/svg", "g");
-    overG.setAttribute("id", "isp-overlay-g");
-    overG.setAttribute("pointer-events", "none");
-    gEl.appendChild(overG);
+    const BRAND_COLOR_LOCAL = { cisco: "#2563EB", juniper: "#16A34A", cirion: "#8B5CF6" };
+    const rtrBySite = Object.fromEntries(rtrData.map(r => [r.site_id, r]));
 
-    // Mapear site_id → nodo D3 (posición actual)
-    const nodeEls = gEl.querySelectorAll(".node");
-    const sitePos = {};
-    nodeEls.forEach(el => {
-      const transform = el.getAttribute("transform") || "";
-      const m = transform.match(/translate\(([-\d.]+),\s*([-\d.]+)\)/);
-      if (m) {
-        const datum = el.__data__;
-        if (datum?.id) sitePos[datum.id] = { x: +m[1], y: +m[2] };
-      }
-    });
+    // Adjuntar el badge directamente al .node-group de D3.
+    // Al estar dentro del grupo, hereda su transform="translate(x,y)" y se mueve
+    // automáticamente con el nodo al hacer drag o al cambiar entre grafo y mapa.
+    document.querySelectorAll(".node-group").forEach(el => {
+      const datum = el.__data__;
+      if (!datum?.id) return;
+      const rtr = rtrBySite[datum.id];
+      if (!rtr) return;
 
-    rtrData.forEach(rtr => {
-      const pos = sitePos[rtr.site_id];
-      if (!pos) return;
-      const color = BRAND_COLOR[rtr.brand] || "#888";
-      const arm = 7;
-      // Círculo + cruz sobre el nodo
+      const color = BRAND_COLOR_LOCAL[rtr.brand] || "#888";
+      const arm   = 7;
+
+      const badge = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      badge.setAttribute("class", "router-isp-badge");
+      badge.setAttribute("pointer-events", "none");
+
+      // Círculo de router (coordenadas relativas al grupo → 0, 0 = centro del nodo)
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      circle.setAttribute("cx", pos.x); circle.setAttribute("cy", pos.y);
       circle.setAttribute("r", "10"); circle.setAttribute("fill", color);
       circle.setAttribute("stroke", "#fff"); circle.setAttribute("stroke-width", "1.5");
       circle.setAttribute("opacity", "0.9");
-      overG.appendChild(circle);
-      ["h","v"].forEach(dir => {
+      badge.appendChild(circle);
+
+      // Cruz blanca centrada
+      ["h", "v"].forEach(dir => {
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        if (dir === "h") { line.setAttribute("x1", pos.x - arm); line.setAttribute("y1", pos.y); line.setAttribute("x2", pos.x + arm); line.setAttribute("y2", pos.y); }
-        else             { line.setAttribute("x1", pos.x); line.setAttribute("y1", pos.y - arm); line.setAttribute("x2", pos.x); line.setAttribute("y2", pos.y + arm); }
+        if (dir === "h") { line.setAttribute("x1", -arm); line.setAttribute("y1", "0"); line.setAttribute("x2", arm); line.setAttribute("y2", "0"); }
+        else             { line.setAttribute("x1", "0"); line.setAttribute("y1", -arm); line.setAttribute("x2", "0"); line.setAttribute("y2", arm); }
         line.setAttribute("stroke", "#fff"); line.setAttribute("stroke-width", "2");
         line.setAttribute("stroke-linecap", "round");
-        overG.appendChild(line);
+        badge.appendChild(line);
       });
 
-      // Nubes ISP cercanas al nodo
+      // Nubes ISP: una elipse por proveedor, distribuidas radialmente alrededor del nodo
       const ispIfaces = rtr.interfaces.filter(i => i.iface_type === "isp");
-      const seenProv = new Set();
-      ispIfaces.forEach((iface, idx) => {
-        if (seenProv.has(iface.isp_provider_id)) return;
-        seenProv.add(iface.isp_provider_id);
-        const angle = (idx / (seenProv.size + 2)) * Math.PI * 2 - Math.PI / 2;
-        const dist  = 42;
-        const cx = pos.x + Math.cos(angle) * dist;
-        const cy = pos.y + Math.sin(angle) * dist;
-        // Línea
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        line.setAttribute("x1", pos.x); line.setAttribute("y1", pos.y);
-        line.setAttribute("x2", cx); line.setAttribute("y2", cy);
-        line.setAttribute("stroke", iface.isp_provider_color || "#888");
-        line.setAttribute("stroke-width", "1.5"); line.setAttribute("stroke-dasharray", "3,2");
-        line.setAttribute("opacity", "0.7");
-        overG.appendChild(line);
-        // Elipse nube mini
+      const provsSeen = new Set();
+      let provIdx = 0;
+      ispIfaces.forEach(iface => {
+        if (provsSeen.has(iface.isp_provider_id)) return;
+        provsSeen.add(iface.isp_provider_id);
+        const total = [...new Set(ispIfaces.map(i => i.isp_provider_id))].length;
+        const angle = (provIdx / total) * Math.PI * 2 - Math.PI / 2;
+        const dist  = 44;
+        const cx    = Math.cos(angle) * dist;
+        const cy    = Math.sin(angle) * dist;
+        provIdx++;
+
+        // Línea de conexión
+        const ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        ln.setAttribute("x1", "0"); ln.setAttribute("y1", "0");
+        ln.setAttribute("x2", cx);  ln.setAttribute("y2", cy);
+        ln.setAttribute("stroke", iface.isp_provider_color || "#888");
+        ln.setAttribute("stroke-width", "1.5"); ln.setAttribute("stroke-dasharray", "3,2");
+        ln.setAttribute("opacity", "0.75");
+        badge.appendChild(ln);
+
+        // Elipse nube
         const ell = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
         ell.setAttribute("cx", cx); ell.setAttribute("cy", cy);
-        ell.setAttribute("rx", "14"); ell.setAttribute("ry", "9");
-        ell.setAttribute("fill", iface.isp_provider_color || "#888"); ell.setAttribute("fill-opacity", "0.22");
+        ell.setAttribute("rx", "15"); ell.setAttribute("ry", "9");
+        ell.setAttribute("fill", iface.isp_provider_color || "#888"); ell.setAttribute("fill-opacity", "0.20");
         ell.setAttribute("stroke", iface.isp_provider_color || "#888"); ell.setAttribute("stroke-width", "1.5");
-        overG.appendChild(ell);
-        // Label
+        badge.appendChild(ell);
+
+        // Etiqueta proveedor
         const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        txt.setAttribute("x", cx); txt.setAttribute("y", cy + 3);
+        txt.setAttribute("x", cx); txt.setAttribute("y", cy + 3.5);
         txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", "6");
         txt.setAttribute("fill", iface.isp_provider_color || "#888"); txt.setAttribute("font-weight", "700");
-        txt.textContent = (iface.isp_provider_name || "ISP").substring(0, 6);
-        overG.appendChild(txt);
+        txt.textContent = (iface.isp_provider_name || "ISP").substring(0, 7);
+        badge.appendChild(txt);
       });
+
+      el.appendChild(badge);
     });
   }
 
@@ -798,6 +799,7 @@ async function renderMap(g, nodes, links, W, H) {
   const nodeG = g.append("g").selectAll("g")
     .data(locatedNodes)
     .join("g")
+    .attr("class", "node-group")   // misma clase que el grafo → _renderISPOverlay funciona en ambos modos
     .attr("cursor", "grab")
     .attr("transform", d => { const [x, y] = posMap.get(d.id); return `translate(${x},${y})`; })
     .on("mouseover", (event, d) => { if (!event.buttons) showNodeTooltip(event, d); })
