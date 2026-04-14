@@ -199,8 +199,12 @@ export async function renderTopology(container) {
     const BRAND_COLOR_LOCAL = { cisco: "#2563EB", juniper: "#16A34A", cirion: "#8B5CF6" };
     const rtrBySite = Object.fromEntries(rtrData.map(r => [r.site_id, r]));
 
+    // Posiciones guardadas de badges (drag independiente)
+    let savedOffsets = {};
+    try { savedOffsets = JSON.parse(localStorage.getItem('isp-badge-offsets') || '{}'); } catch {}
+
     // Adjuntar el badge directamente al .node-group de D3.
-    // Al estar dentro del grupo, hereda su transform="translate(x,y)" y se mueve
+    // Al estar dentro del grupo hereda su transform="translate(x,y)" y se mueve
     // automáticamente con el nodo al hacer drag o al cambiar entre grafo y mapa.
     document.querySelectorAll(".node-group").forEach(el => {
       const datum = el.__data__;
@@ -208,31 +212,35 @@ export async function renderTopology(container) {
       const rtr = rtrBySite[datum.id];
       if (!rtr) return;
 
-      const color = BRAND_COLOR_LOCAL[rtr.brand] || "#888";
-      const arm   = 7;
+      const color  = BRAND_COLOR_LOCAL[rtr.brand] || "#888";
+      const arm    = 6;          // radio del símbolo X
+      const nodeR  = 14;         // radio del nodo DWDM (mismo que en drawNode)
+      const defDx  = nodeR + 16; // posición por defecto: al lado derecho del nodo
+      const offset = savedOffsets[datum.id] || { dx: defDx, dy: 0 };
 
       const badge = document.createElementNS("http://www.w3.org/2000/svg", "g");
       badge.setAttribute("class", "router-isp-badge");
-      badge.setAttribute("pointer-events", "none");
+      badge.setAttribute("cursor", "grab");
+      badge.setAttribute("transform", `translate(${offset.dx},${offset.dy})`);
 
-      // Círculo de router (coordenadas relativas al grupo → 0, 0 = centro del nodo)
+      // Círculo de router — separado del nodo DWDM
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("r", "10"); circle.setAttribute("fill", color);
       circle.setAttribute("stroke", "#fff"); circle.setAttribute("stroke-width", "1.5");
       circle.setAttribute("opacity", "0.9");
       badge.appendChild(circle);
 
-      // Cruz blanca centrada
-      ["h", "v"].forEach(dir => {
+      // Símbolo X (ruteador) — líneas diagonales en lugar de cruz +
+      [[-arm, -arm, arm, arm], [arm, -arm, -arm, arm]].forEach(([x1, y1, x2, y2]) => {
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        if (dir === "h") { line.setAttribute("x1", -arm); line.setAttribute("y1", "0"); line.setAttribute("x2", arm); line.setAttribute("y2", "0"); }
-        else             { line.setAttribute("x1", "0"); line.setAttribute("y1", -arm); line.setAttribute("x2", "0"); line.setAttribute("y2", arm); }
+        line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+        line.setAttribute("x2", x2); line.setAttribute("y2", y2);
         line.setAttribute("stroke", "#fff"); line.setAttribute("stroke-width", "2");
         line.setAttribute("stroke-linecap", "round");
         badge.appendChild(line);
       });
 
-      // Nubes ISP: una elipse por proveedor, distribuidas radialmente alrededor del nodo
+      // Nubes ISP: una elipse por proveedor, distribuidas radialmente desde el badge
       const ispIfaces = rtr.interfaces.filter(i => i.iface_type === "isp");
       const provsSeen = new Set();
       let provIdx = 0;
@@ -241,12 +249,12 @@ export async function renderTopology(container) {
         provsSeen.add(iface.isp_provider_id);
         const total = [...new Set(ispIfaces.map(i => i.isp_provider_id))].length;
         const angle = (provIdx / total) * Math.PI * 2 - Math.PI / 2;
-        const dist  = 44;
+        const dist  = 42;
         const cx    = Math.cos(angle) * dist;
         const cy    = Math.sin(angle) * dist;
         provIdx++;
 
-        // Línea de conexión
+        // Línea de conexión badge → elipse ISP
         const ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
         ln.setAttribute("x1", "0"); ln.setAttribute("y1", "0");
         ln.setAttribute("x2", cx);  ln.setAttribute("y2", cy);
@@ -255,22 +263,47 @@ export async function renderTopology(container) {
         ln.setAttribute("opacity", "0.75");
         badge.appendChild(ln);
 
-        // Elipse nube
+        // Elipse proveedor ISP
         const ell = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
         ell.setAttribute("cx", cx); ell.setAttribute("cy", cy);
-        ell.setAttribute("rx", "15"); ell.setAttribute("ry", "9");
-        ell.setAttribute("fill", iface.isp_provider_color || "#888"); ell.setAttribute("fill-opacity", "0.20");
-        ell.setAttribute("stroke", iface.isp_provider_color || "#888"); ell.setAttribute("stroke-width", "1.5");
+        ell.setAttribute("rx", "16"); ell.setAttribute("ry", "9");
+        ell.setAttribute("fill", iface.isp_provider_color || "#888");
+        ell.setAttribute("fill-opacity", "0.18");
+        ell.setAttribute("stroke", iface.isp_provider_color || "#888");
+        ell.setAttribute("stroke-width", "1.5");
         badge.appendChild(ell);
 
         // Etiqueta proveedor
         const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
         txt.setAttribute("x", cx); txt.setAttribute("y", cy + 3.5);
         txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", "6");
-        txt.setAttribute("fill", iface.isp_provider_color || "#888"); txt.setAttribute("font-weight", "700");
-        txt.textContent = (iface.isp_provider_name || "ISP").substring(0, 7);
+        txt.setAttribute("fill", iface.isp_provider_color || "#888");
+        txt.setAttribute("font-weight", "700");
+        txt.textContent = (iface.isp_provider_name || "ISP").substring(0, 8);
         badge.appendChild(txt);
       });
+
+      // Drag independiente: mueve solo el badge (no el nodo DWDM)
+      d3.select(badge).call(
+        d3.drag()
+          .on("start", event => { event.sourceEvent.stopPropagation(); })
+          .on("drag", event => {
+            const t = badge.getAttribute("transform").match(/translate\(([^,]+),([^)]+)\)/);
+            const curDx = t ? parseFloat(t[1]) : defDx;
+            const curDy = t ? parseFloat(t[2]) : 0;
+            badge.setAttribute("transform", `translate(${curDx + event.dx},${curDy + event.dy})`);
+          })
+          .on("end", () => {
+            const t = badge.getAttribute("transform").match(/translate\(([^,]+),([^)]+)\)/);
+            const finalDx = t ? parseFloat(t[1]) : defDx;
+            const finalDy = t ? parseFloat(t[2]) : 0;
+            try {
+              const offsets = JSON.parse(localStorage.getItem('isp-badge-offsets') || '{}');
+              offsets[datum.id] = { dx: finalDx, dy: finalDy };
+              localStorage.setItem('isp-badge-offsets', JSON.stringify(offsets));
+            } catch {}
+          })
+      );
 
       el.appendChild(badge);
     });

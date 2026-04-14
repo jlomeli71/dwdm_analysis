@@ -56,4 +56,14 @@ export const API = {
   updateTrafficFlow:     (id, body) => request("PUT", `/traffic-flows/${id}`, body),
   simulateISPProvider:   body       => request("POST", "/simulation/isp-provider", body),
   simulateLambdaTraffic: body       => request("POST", "/simulation/lambda-traffic", body),
+
+  // Utilización mensual (Excel import)
+  uploadLambdaUtilization: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(BASE + "/upload/lambda-utilization", { method: "POST", body: fd })
+      .then(r => r.json().catch(() => ({})))
+      .then(data => { if (!data.status) throw data; return data; });
+  },
+  getLambdaUtilization: (month = "") => request("GET", `/lambda-utilization${month ? "?month=" + month : ""}`),
 };

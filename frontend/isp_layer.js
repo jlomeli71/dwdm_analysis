@@ -33,11 +33,21 @@ export async function renderISPLayer(container) {
         <svg id="isp-svg" style="width:100%;height:100%"></svg>
       </div>
 
-      <!-- Panel derecho: matriz + métricas ISIS -->
+      <!-- Panel derecho: matrices + métricas ISIS -->
       <div class="isp-matrix-panel" id="isp-matrix-panel">
+
+        <!-- 2.2 Capacidad ISP -->
         <div class="isp-matrix-header">
-          <span>Matriz de Tráfico</span>
-          <span class="isp-matrix-sub">N° interfaces × 100 Gbps — editable</span>
+          <span>📦 Capacidad ISP</span>
+          <span class="isp-matrix-sub">Interfaces físicas por proveedor y sitio</span>
+          <button class="btn-tool btn-sm isp-lag-btn" id="isp-lag-toggle" title="Agrupar interfaces como LAG">⚡ LAG</button>
+        </div>
+        <div id="isp-capacity-content"><div class="isp-loading">Cargando…</div></div>
+
+        <!-- 2.3 Tráfico / Uso -->
+        <div class="isp-matrix-header">
+          <span>📊 Tráfico / Uso</span>
+          <span class="isp-matrix-sub">Gbps por flujo — editable · 🟢&lt;60% 🟡60-79% 🔴≥80%</span>
         </div>
         <div id="isp-matrix-content"><div class="isp-loading">Cargando…</div></div>
 
@@ -47,21 +57,52 @@ export async function renderISPLayer(container) {
           <span class="isp-matrix-sub">Cisco &amp; Juniper · default 10 · rango 1–16 777 214</span>
         </div>
         <div id="isp-metrics-content"><div class="isp-loading">Cargando…</div></div>
+
+        <!-- Utilización mensual (Excel) -->
+        <div class="isp-matrix-header">
+          <span>📈 Utilización Histórica</span>
+          <span class="isp-matrix-sub">Importar desde Excel mensual</span>
+        </div>
+        <div id="isp-util-content">
+          <div class="isp-util-upload">
+            <label class="isp-util-label" for="isp-util-file">
+              📂 Seleccionar .xlsx
+              <input type="file" id="isp-util-file" accept=".xlsx,.xls" style="display:none">
+            </label>
+            <button class="btn-tool btn-sm" id="isp-util-upload-btn" disabled>⬆ Cargar</button>
+          </div>
+          <div id="isp-util-status"></div>
+          <div id="isp-util-history"><div class="isp-loading">Sin datos cargados.</div></div>
+        </div>
       </div>
     </div>
   </div>`;
 
   await loadData();
   renderGraph();
+  renderCapacityMatrix();
   renderMatrix();
   renderISPMetrics();
+
+  // LAG toggle
+  let lagGrouped = false;
+  document.getElementById("isp-lag-toggle")?.addEventListener("click", (e) => {
+    lagGrouped = !lagGrouped;
+    e.currentTarget.classList.toggle("active", lagGrouped);
+    renderCapacityMatrix(lagGrouped);
+  });
 
   document.getElementById("isp-btn-reload")?.addEventListener("click", async () => {
     await loadData();
     renderGraph();
+    renderCapacityMatrix(lagGrouped);
     renderMatrix();
     renderISPMetrics();
   });
+
+  // Utilización histórica: inicializar upload UI
+  _initUtilUpload();
+  renderUtilHistory();
 }
 
 // ── Carga de datos ────────────────────────────────────────────────────────────
@@ -250,33 +291,34 @@ function renderGraph() {
     .on("mousemove", (e) => _positionTooltip(tooltip, e))
     .on("mouseout",  () => tooltip.style("display", "none"));
 
-  // Ruteadores: círculo relleno + cruz blanca
+  // Ruteadores: círculo relleno + símbolo X blanco (diagonales ×)
   nodeSel.filter(d => d.kind === "router").each(function(d) {
     const sel = d3.select(this);
     const color = BRAND_COLOR[d.brand] || "#888";
     sel.append("circle").attr("r", NODE_R).attr("fill", color).attr("stroke", "#fff").attr("stroke-width", 1.5);
-    // Cruz blanca
-    const arm = NODE_R * 0.55;
-    sel.append("line").attr("x1", -arm).attr("y1", 0).attr("x2", arm).attr("y2", 0)
+    // Símbolo X — líneas diagonales en lugar de cruz +
+    const arm = NODE_R * 0.52;
+    sel.append("line").attr("x1", -arm).attr("y1", -arm).attr("x2", arm).attr("y2", arm)
       .attr("stroke", "#fff").attr("stroke-width", 2.5).attr("stroke-linecap", "round");
-    sel.append("line").attr("x1", 0).attr("y1", -arm).attr("x2", 0).attr("y2", arm)
+    sel.append("line").attr("x1", arm).attr("y1", -arm).attr("x2", -arm).attr("y2", arm)
       .attr("stroke", "#fff").attr("stroke-width", 2.5).attr("stroke-linecap", "round");
     // Etiqueta
     sel.append("text").attr("dy", NODE_R + 13).attr("text-anchor", "middle")
       .attr("font-size", "10").attr("fill", "var(--text-secondary)").text(d.label);
   });
 
-  // Nubes ISP: forma de nube SVG + etiqueta
+  // Proveedores ISP: elipse coloreada + etiqueta
   nodeSel.filter(d => d.kind === "isp").each(function(d) {
     const sel = d3.select(this);
-    sel.append("path")
-      .attr("d", cloudPath(CLOUD_W, CLOUD_H))
-      .attr("transform", `translate(${-CLOUD_W / 2},${-CLOUD_H / 2})`)
+    // Elipse del proveedor ISP (reemplaza la nube SVG)
+    sel.append("ellipse")
+      .attr("rx", CLOUD_W / 2)
+      .attr("ry", CLOUD_H / 2)
       .attr("fill", d.color)
-      .attr("fill-opacity", 0.25)
+      .attr("fill-opacity", 0.20)
       .attr("stroke", d.color)
       .attr("stroke-width", 2);
-    sel.append("text").attr("dy", 5).attr("text-anchor", "middle")
+    sel.append("text").attr("dy", 4).attr("text-anchor", "middle")
       .attr("font-size", "9.5").attr("font-weight", "700").attr("fill", d.color)
       .text(d.providerName);
     sel.append("text").attr("dy", CLOUD_H / 2 + 13).attr("text-anchor", "middle")
@@ -292,6 +334,114 @@ function renderGraph() {
       .attr("y2", d => (typeof d.target === "object" ? d.target : nodeById[d.target])?.y ?? 0);
     nodeSel.attr("transform", d => `translate(${d.x ?? 0},${d.y ?? 0})`);
   });
+}
+
+// ── Matriz de Capacidad ISP (Tarea 2.2) ──────────────────────────────────────
+function renderCapacityMatrix(lagGrouped = false) {
+  const content = document.getElementById("isp-capacity-content");
+  if (!content) return;
+
+  // Construir filas: por ruteador → agrupar ISP interfaces por proveedor
+  const routerRows = [];
+  routers.forEach(r => {
+    const ispIfaces = (r.interfaces || []).filter(i => i.iface_type === "isp");
+    if (ispIfaces.length === 0) return;
+
+    // Agrupar por proveedor
+    const byProv = {};
+    ispIfaces.forEach(iface => {
+      const key = iface.isp_provider_id;
+      if (!byProv[key]) byProv[key] = { name: iface.isp_provider_name, color: iface.isp_provider_color, ifaces: [] };
+      byProv[key].ifaces.push(iface.name);
+    });
+
+    Object.values(byProv).forEach(prov => {
+      routerRows.push({
+        rtrName: r.name,
+        brand: r.brand,
+        siteId: r.site_id,
+        providerName: prov.name,
+        providerColor: prov.color,
+        ifaces: prov.ifaces,
+        count: prov.ifaces.length,
+        capGbps: prov.ifaces.length * 100,
+      });
+    });
+  });
+
+  // Lambda / inter-router capacity: agrupar por par de sitios con ruteador
+  const rtrSites = new Set(routers.map(r => r.site_id));
+  const lambdaCap = {};
+  lambdas.forEach(lm => {
+    if (!lm.segments || lm.segments.length === 0) return;
+    const ends = _lambdaEndpoints(lm);
+    if (!ends) return;
+    const [a, b] = [ends.ingress, ends.egress].sort();
+    if (!rtrSites.has(a) || !rtrSites.has(b)) return;
+    const key = `${a}|${b}`;
+    lambdaCap[key] = (lambdaCap[key] || 0) + (lm.capacity_per_lambda || 100);
+  });
+
+  if (routerRows.length === 0) {
+    content.innerHTML = `<div style="color:var(--text-muted);font-size:12px;padding:12px">Sin interfaces ISP configuradas.</div>`;
+    return;
+  }
+
+  let html = `<div class="isp-matrix-scroll"><table class="isp-matrix-table">
+    <thead>
+      <tr>
+        <th class="isp-matrix-th">Ruteador</th>
+        <th class="isp-matrix-th">Proveedor</th>
+        <th class="isp-matrix-th">Interfaces</th>
+        <th class="isp-matrix-th">Capacidad</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  routerRows.forEach(row => {
+    const ifaceDisplay = lagGrouped
+      ? `<span class="isp-lag-badge">${row.count}×100G LAG</span>`
+      : row.ifaces.map(n => `<code class="isp-iface-name">${n}</code>`).join(" ");
+    html += `<tr>
+      <td class="isp-matrix-td"><span class="isp-brand-dot" style="background:${BRAND_COLOR[row.brand]}"></span>${row.rtrName}</td>
+      <td class="isp-matrix-td">
+        <span class="isp-provider-dot" style="background:${row.providerColor}"></span>${row.providerName}
+      </td>
+      <td class="isp-matrix-td">${ifaceDisplay}</td>
+      <td class="isp-matrix-td isp-matrix-td--total">${lagGrouped ? row.capGbps + " Gbps" : row.count + "×100G"}</td>
+    </tr>`;
+  });
+
+  // Separador y lambdas inter-router
+  if (Object.keys(lambdaCap).length > 0) {
+    html += `<tr><td colspan="4" class="isp-matrix-th" style="font-size:11px;padding-top:8px">⚡ Capacidad Lambda inter-ruteador</td></tr>`;
+    const siteNameMap = {};
+    routers.forEach(r => { siteNameMap[r.site_id] = r.name || r.site_id; });
+    Object.entries(lambdaCap).forEach(([key, gbps]) => {
+      const [a, b] = key.split("|");
+      html += `<tr>
+        <td class="isp-matrix-td" colspan="2">${siteNameMap[a] || a} ↔ ${siteNameMap[b] || b}</td>
+        <td class="isp-matrix-td isp-matrix-td--cell"></td>
+        <td class="isp-matrix-td isp-matrix-td--total">${gbps} Gbps</td>
+      </tr>`;
+    });
+  }
+
+  html += `</tbody></table></div>
+    <div class="isp-matrix-note">Capacidad física disponible. ⚡ LAG agrupa interfaces por proveedor.</div>`;
+  content.innerHTML = html;
+}
+
+function _lambdaEndpoints(lm) {
+  // Retorna { ingress, egress } a partir de los segmentos de la lambda
+  if (!lm.segments || lm.segments.length === 0) return null;
+  const freq = {};
+  lm.segments.forEach(s => {
+    [s.site_a_id, s.site_b_id].forEach(sid => { freq[sid] = (freq[sid] || 0) + 1; });
+  });
+  const endpoints = Object.entries(freq).filter(([, c]) => c === 1).map(([s]) => s);
+  if (endpoints.length !== 2) return null;
+  return { ingress: endpoints[0], egress: endpoints[1] };
 }
 
 // ── Matriz de tráfico ─────────────────────────────────────────────────────────
@@ -341,14 +491,19 @@ function renderMatrix() {
   const egressNames = {};
   flows.forEach(f => { egressNames[f.egress_site_id] = f.egress_site_name; });
 
-  // Construir tabla
+  // Semáforo: clase CSS según % de utilización
+  function semClass(pct) {
+    return pct >= 80 ? "sem-red" : pct >= 60 ? "sem-yellow" : "sem-green";
+  }
+
+  // Construir tabla con valores en Gbps + semáforo
   let html = `<div class="isp-matrix-scroll"><table class="isp-matrix-table">
   <thead>
     <tr>
       <th class="isp-matrix-th">Proveedor / Sitio</th>
       ${egressSites.map(s => `<th class="isp-matrix-th isp-matrix-th--egress">${egressNames[s] || s}</th>`).join("")}
-      <th class="isp-matrix-th">Total</th>
-      <th class="isp-matrix-th">Cap. ISP</th>
+      <th class="isp-matrix-th">Total Gbps</th>
+      <th class="isp-matrix-th">% Cap.</th>
     </tr>
   </thead>
   <tbody>`;
@@ -356,9 +511,12 @@ function renderMatrix() {
   rows.forEach(row => {
     const capKey    = `${providers.find(p => p.name === row.providerName)?.id ?? ""}_${row.ingressSiteId}`;
     const capIfaces = ispCapacity[capKey] || 0;
-    const rowTotal  = egressSites.reduce((s, e) => s + (row.egressMap[e]?.interfaces_count || 0), 0);
-    const pct       = capIfaces > 0 ? Math.round((rowTotal / capIfaces) * 100) : 0;
-    const pctColor  = pct >= 80 ? "var(--accent-red)" : pct >= 60 ? "var(--accent-orange)" : "var(--accent-green)";
+    const capGbps   = capIfaces * 100;
+    // rowTotal in interfaces_count; convert to Gbps for display
+    const rowIfaceTotal = egressSites.reduce((s, e) => s + (row.egressMap[e]?.interfaces_count || 0), 0);
+    const rowGbps       = rowIfaceTotal * 100;
+    const pct           = capGbps > 0 ? Math.round((rowGbps / capGbps) * 100) : 0;
+    const sem           = semClass(pct);
 
     html += `<tr>
       <td class="isp-matrix-td isp-matrix-td--label">
@@ -368,49 +526,52 @@ function renderMatrix() {
       </td>
       ${egressSites.map(e => {
         const f = row.egressMap[e];
-        const v = f ? f.interfaces_count : null;
-        return `<td class="isp-matrix-td isp-matrix-td--cell">
+        const gbpsVal = f ? f.interfaces_count * 100 : null;
+        const cellPct = (f && capGbps > 0) ? Math.round((f.interfaces_count * 100 / capGbps) * 100) : 0;
+        const cellSem = semClass(cellPct);
+        return `<td class="isp-matrix-td isp-matrix-td--cell ${f ? cellSem : ""}">
           ${f
-            ? `<input class="isp-matrix-input" type="number" min="0" max="96"
-                 value="${v}" data-flow-id="${f.id}"
+            ? `<input class="isp-matrix-input" type="number" min="0" step="100" max="${capGbps || 9600}"
+                 value="${gbpsVal}" data-flow-id="${f.id}" data-cap="${capGbps}"
                  title="${f.lambda_names ? "Lambdas: " + f.lambda_names : ""}">`
             : `<span class="isp-matrix-na">—</span>`}
         </td>`;
       }).join("")}
-      <td class="isp-matrix-td isp-matrix-td--total">${rowTotal}</td>
-      <td class="isp-matrix-td isp-matrix-td--cap">
-        <span style="color:${pctColor}">${rowTotal}/${capIfaces}</span>
-        <span class="isp-matrix-pct" style="color:${pctColor}">${pct}%</span>
+      <td class="isp-matrix-td isp-matrix-td--total ${sem}">${rowGbps} Gbps</td>
+      <td class="isp-matrix-td isp-matrix-td--cap ${sem}">
+        ${capGbps > 0 ? `<span class="isp-matrix-pct">${pct}%</span><span style="font-size:10px;display:block">${rowGbps}/${capGbps}G</span>` : "—"}
       </td>
     </tr>`;
   });
 
-  // Fila de totales por egress
+  // Fila de totales por egress (en Gbps)
   const colTotals = {};
   egressSites.forEach(e => {
-    colTotals[e] = flows.filter(f => f.egress_site_id === e).reduce((s, f) => s + f.interfaces_count, 0);
+    colTotals[e] = flows.filter(f => f.egress_site_id === e).reduce((s, f) => s + f.interfaces_count * 100, 0);
   });
   const grandTotal = Object.values(colTotals).reduce((a, b) => a + b, 0);
   html += `<tr class="isp-matrix-totals">
     <td class="isp-matrix-td isp-matrix-td--label"><b>Total ↓</b></td>
-    ${egressSites.map(e => `<td class="isp-matrix-td isp-matrix-td--total"><b>${colTotals[e]}</b></td>`).join("")}
-    <td class="isp-matrix-td isp-matrix-td--total"><b>${grandTotal}</b></td>
+    ${egressSites.map(e => `<td class="isp-matrix-td isp-matrix-td--total"><b>${colTotals[e]}G</b></td>`).join("")}
+    <td class="isp-matrix-td isp-matrix-td--total"><b>${grandTotal} Gbps</b></td>
     <td class="isp-matrix-td isp-matrix-td--cap"></td>
   </tr>`;
 
   html += "</tbody></table></div>";
-  html += `<div class="isp-matrix-note">Valores en N° de interfaces de 100 Gbps. Hover sobre celda → lambdas de transporte.</div>`;
+  html += `<div class="isp-matrix-note">Valores en Gbps · Ingresa en múltiplos de 100 · Hover → lambdas de transporte.</div>`;
   content.innerHTML = html;
 
-  // Eventos de edición inline
+  // Eventos de edición inline (input en Gbps → guardar como interfaces_count = gbps/100)
   content.querySelectorAll(".isp-matrix-input").forEach(input => {
     input.addEventListener("change", async (e) => {
-      const flowId = +e.target.dataset.flowId;
-      const val    = Math.max(0, +e.target.value);
-      e.target.value = val;
+      const flowId  = +e.target.dataset.flowId;
+      const capGbps = +e.target.dataset.cap || 9600;
+      // Redondear a múltiplos de 100 y clampear al máximo de capacidad
+      const gbps    = Math.min(Math.max(0, Math.round(+e.target.value / 100) * 100), capGbps);
+      const ifaces  = gbps / 100;
+      e.target.value = gbps;
       try {
-        await API.updateTrafficFlow(flowId, { interfaces_count: val });
-        // Refrescar flows en memoria
+        await API.updateTrafficFlow(flowId, { interfaces_count: ifaces });
         const updated = await API.getTrafficFlows();
         flows = updated;
         renderMatrix();
@@ -509,18 +670,6 @@ function renderISPMetrics() {
 
 // ── Utilidades ────────────────────────────────────────────────────────────────
 
-/** Genera el path SVG de una nube simple */
-function cloudPath(w, h) {
-  const r = h * 0.28;
-  const x = w * 0.1, y = h * 0.55;
-  return `M${x + r},${y}
-    a${r},${r} 0 0,1 ${r * 0.6},${-r * 1.1}
-    a${r * 1.1},${r * 1.1} 0 0,1 ${r * 2},${-r * 0.3}
-    a${r * 0.9},${r * 0.9} 0 0,1 ${r * 1.6},${r * 1.4}
-    a${r * 0.75},${r * 0.75} 0 0,1 ${-r * 0.3},${r}
-    H${x + r}Z`;
-}
-
 function _ensureTooltip() {
   let tt = document.getElementById("isp-tooltip");
   if (!tt) {
@@ -537,4 +686,113 @@ function _positionTooltip(tooltip, e) {
   const x = e.clientX + 14;
   const y = e.clientY - 10;
   tooltip.style("left", `${x}px`).style("top", `${y}px`);
+}
+
+
+// ── Utilización Histórica (Excel import) ──────────────────────────────────────
+
+function _initUtilUpload() {
+  const fileInput  = document.getElementById("isp-util-file");
+  const uploadBtn  = document.getElementById("isp-util-upload-btn");
+  const labelEl    = document.querySelector("label[for='isp-util-file']");
+  const statusEl   = document.getElementById("isp-util-status");
+
+  if (!fileInput || !uploadBtn) return;
+
+  fileInput.addEventListener("change", () => {
+    const f = fileInput.files[0];
+    uploadBtn.disabled = !f;
+    if (labelEl && f) labelEl.textContent = `📂 ${f.name}`;
+  });
+
+  uploadBtn.addEventListener("click", async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    uploadBtn.disabled = true;
+    statusEl.innerHTML = `<div class="isp-util-msg isp-util-loading">Cargando…</div>`;
+    try {
+      const result = await API.uploadLambdaUtilization(file);
+      const flagLines = result.flagged_rows?.length > 0
+        ? `<details class="isp-util-flags"><summary>⚠ ${result.flagged_rows.length} filas con alertas</summary><ul>${
+            result.flagged_rows.map(r => `<li><b>${r.link_name}</b> (${r.month}) — ${r.flags.join(", ")}${r.flags.includes("UNKNOWN_SITE") ? ` · sitio desconocido` : ""}</li>`).join("")
+          }</ul></details>` : "";
+      statusEl.innerHTML = `
+        <div class="isp-util-msg isp-util-ok">
+          ✅ ${result.records_imported} registros importados · meses: ${result.months_loaded?.join(", ")}
+        </div>${flagLines}`;
+      renderUtilHistory();
+    } catch (err) {
+      statusEl.innerHTML = `<div class="isp-util-msg isp-util-error">❌ ${err.error || "Error al cargar"}</div>`;
+    } finally {
+      uploadBtn.disabled = false;
+    }
+  });
+}
+
+async function renderUtilHistory() {
+  const el = document.getElementById("isp-util-history");
+  if (!el) return;
+  try {
+    const data = await API.getLambdaUtilization();
+    if (!data.months || data.months.length === 0) {
+      el.innerHTML = `<div class="isp-loading">Sin datos históricos. Carga un archivo Excel.</div>`;
+      return;
+    }
+
+    // Construir tabla agrupada por mes, con semáforo
+    let html = `<div class="isp-util-month-tabs">`;
+    data.months.forEach((m, i) => {
+      html += `<button class="btn-tool btn-sm isp-util-tab${i === 0 ? " active" : ""}" data-month="${m}">${m}</button>`;
+    });
+    html += `</div><div id="isp-util-table-wrap"></div>`;
+    el.innerHTML = html;
+
+    function showMonth(month) {
+      const rows = data.data[month] || [];
+      let t = `<div class="isp-matrix-scroll"><table class="isp-matrix-table isp-util-table">
+        <thead><tr>
+          <th class="isp-matrix-th">Enlace</th>
+          <th class="isp-matrix-th">BW</th>
+          <th class="isp-matrix-th">Max Gbps</th>
+          <th class="isp-matrix-th">% Max</th>
+          <th class="isp-matrix-th">AVG Gbps</th>
+          <th class="isp-matrix-th">% AVG</th>
+          <th class="isp-matrix-th">Lambda</th>
+          <th class="isp-matrix-th">Alertas</th>
+        </tr></thead><tbody>`;
+      rows.forEach(r => {
+        const semMax = r.pct_max >= 80 ? "sem-red" : r.pct_max >= 60 ? "sem-yellow" : "sem-green";
+        const semAvg = r.pct_avg >= 80 ? "sem-red" : r.pct_avg >= 60 ? "sem-yellow" : "sem-green";
+        const flagBadges = r.flags ? r.flags.split(",").map(f =>
+          `<span class="isp-flag-badge isp-flag-${f.toLowerCase().replace("_","-")}">${f}</span>`
+        ).join("") : "";
+        t += `<tr class="${r.flags ? "isp-util-row-flagged" : ""}">
+          <td class="isp-matrix-td" style="text-align:left;font-size:10px">${r.link_name}</td>
+          <td class="isp-matrix-td">${r.bw_gbps}G</td>
+          <td class="isp-matrix-td ${semMax}">${r.max_gbps ?? "—"}</td>
+          <td class="isp-matrix-td ${semMax}">${r.pct_max != null ? r.pct_max + "%" : "—"}</td>
+          <td class="isp-matrix-td ${semAvg}">${r.avg_gbps ?? "—"}</td>
+          <td class="isp-matrix-td ${semAvg}">${r.pct_avg != null ? r.pct_avg + "%" : "—"}</td>
+          <td class="isp-matrix-td" style="font-size:9px;color:var(--text-muted)">${r.lambda_name || "—"}</td>
+          <td class="isp-matrix-td">${flagBadges}</td>
+        </tr>`;
+      });
+      t += `</tbody></table></div>`;
+      document.getElementById("isp-util-table-wrap").innerHTML = t;
+    }
+
+    // Mostrar primer mes por defecto
+    showMonth(data.months[0]);
+
+    // Tabs de meses
+    el.querySelectorAll(".isp-util-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        el.querySelectorAll(".isp-util-tab").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        showMonth(btn.dataset.month);
+      });
+    });
+  } catch {
+    el.innerHTML = `<div class="isp-loading">Error al cargar historial.</div>`;
+  }
 }

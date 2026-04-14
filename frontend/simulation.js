@@ -112,10 +112,11 @@ export async function renderSimulation(container) {
   `;
 
   allSegments = await API.getSegments();
-  const [providers, ispProviders, ispFlows] = await Promise.all([
+  const [providers, ispProviders, ispFlows, ispRouters] = await Promise.all([
     API.getProviders(),
     API.getISPProviders(),
     API.getTrafficFlows(),
+    API.getRouters(),
   ]);
 
   // Poblar select de proveedores de fibra
@@ -136,17 +137,18 @@ export async function renderSimulation(container) {
     ispProvSel.appendChild(opt);
   });
 
-  // Al cambiar proveedor ISP → filtrar sitios que tienen ese proveedor en flows
+  // Al cambiar proveedor ISP → filtrar sitios que tienen interfaces de ese proveedor
   ispProvSel.addEventListener('change', () => {
     const prov = ispProvSel.value;
     const siteSel = document.getElementById('sim-isp-site-select');
     siteSel.innerHTML = '<option value="">— Seleccionar sitio —</option>';
     siteSel.disabled = !prov;
     if (prov) {
+      // Buscar sitios que tengan interfaces ISP del proveedor seleccionado
       const sites = [...new Set(
-        ispFlows
-          .filter(f => f.isp_provider === prov && f.interfaces_count > 0)
-          .map(f => f.ingress_site_id)
+        ispRouters
+          .filter(r => r.interfaces?.some(i => i.iface_type === 'isp' && i.isp_provider_name === prov))
+          .map(r => r.site_id)
       )];
       sites.forEach(sid => {
         const opt = document.createElement('option');
@@ -156,7 +158,7 @@ export async function renderSimulation(container) {
       });
       if (sites.length === 0) {
         document.getElementById('isp-sim-info').textContent =
-          'Sin flujos configurados para este proveedor.';
+          'Sin interfaces configuradas para este proveedor.';
       } else {
         document.getElementById('isp-sim-info').textContent = '';
       }
@@ -169,7 +171,7 @@ export async function renderSimulation(container) {
     const site = document.getElementById('sim-isp-site-select').value;
     if (prov && site) {
       const affected = ispFlows
-        .filter(f => f.isp_provider === prov && f.ingress_site_id === site && f.interfaces_count > 0);
+        .filter(f => f.isp_provider_name === prov && f.ingress_site_id === site);
       const gbps = affected.reduce((s, f) => s + f.interfaces_count * 100, 0);
       document.getElementById('isp-sim-info').textContent =
         `${affected.length} flujo(s) afectado(s) · ${gbps} Gbps`;
@@ -529,24 +531,24 @@ async function runAnalyzeAll() {
   el.innerHTML = `<div class="empty-state"><div style="font-size:32px">⏳</div><div>Analizando todas las combinaciones…</div></div>`;
 
   try {
-    const [ispProviders, ispFlows] = await Promise.all([
+    const [ispProviders, ispRoutersAll] = await Promise.all([
       API.getISPProviders(),
-      API.getTrafficFlows(),
+      API.getRouters(),
     ]);
 
-    // Construir lista de combinaciones proveedor+sitio con flujos activos
+    // Construir lista de combinaciones proveedor+sitio con interfaces configuradas
     const combinations = [];
     for (const prov of ispProviders) {
       const sites = [...new Set(
-        ispFlows
-          .filter(f => f.isp_provider === prov.name && f.interfaces_count > 0)
-          .map(f => f.ingress_site_id)
+        ispRoutersAll
+          .filter(r => r.interfaces?.some(i => i.iface_type === 'isp' && i.isp_provider_name === prov.name))
+          .map(r => r.site_id)
       )];
       for (const site of sites) combinations.push({ provider: prov.name, site_id: site });
     }
 
     if (combinations.length === 0) {
-      el.innerHTML = `<div class="empty-state"><div>Sin flujos configurados</div><div style="font-size:12px;color:var(--text-muted)">Configure interfaces en la Capa IP/ISP primero.</div></div>`;
+      el.innerHTML = `<div class="empty-state"><div>Sin interfaces configuradas</div><div style="font-size:12px;color:var(--text-muted)">Configure interfaces ISP en los ruteadores primero.</div></div>`;
       return;
     }
 

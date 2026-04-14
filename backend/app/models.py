@@ -260,3 +260,38 @@ class TrafficFlow(db.Model):
             "capacity_gbps": self.interfaces_count * 100,
             "lambda_names": self.lambda_names,
         }
+
+
+class LambdaUtilization(db.Model):
+    """Utilización mensual de lambdas importada desde Excel."""
+    __tablename__ = "lambda_utilization"
+    __table_args__ = (
+        db.UniqueConstraint("month", "link_name", name="uq_util_month_link"),
+    )
+
+    id        = db.Column(db.Integer, primary_key=True)
+    month     = db.Column(db.String(7),   nullable=False)   # "2025-10"
+    link_name = db.Column(db.String(200), nullable=False)   # del Excel, ej. "Nuevo Laredo-MSO Apodaca"
+    bw_gbps   = db.Column(db.Integer,     nullable=False, default=100)
+    max_gbps  = db.Column(db.Float,       nullable=True)
+    pct_max   = db.Column(db.Float,       nullable=True)    # fracción 0-1
+    avg_gbps  = db.Column(db.Float,       nullable=True)
+    pct_avg   = db.Column(db.Float,       nullable=True)    # fracción 0-1
+    flags     = db.Column(db.String(200), nullable=True)    # CSV: "DOUBLE_LAMBDA", "UNKNOWN_SITE"
+    lambda_id = db.Column(db.Integer, db.ForeignKey("lambdas.id"), nullable=True)
+    lambda_   = db.relationship("Lambda", foreign_keys=[lambda_id])
+
+    def to_dict(self):
+        return {
+            "id":        self.id,
+            "month":     self.month,
+            "link_name": self.link_name,
+            "bw_gbps":   self.bw_gbps,
+            "max_gbps":  round(self.max_gbps, 2)  if self.max_gbps  is not None else None,
+            "pct_max":   round(self.pct_max * 100, 1) if self.pct_max is not None else None,
+            "avg_gbps":  round(self.avg_gbps, 2) if self.avg_gbps is not None else None,
+            "pct_avg":   round(self.pct_avg * 100, 1) if self.pct_avg is not None else None,
+            "flags":     self.flags or "",
+            "lambda_id": self.lambda_id,
+            "lambda_name": self.lambda_.name if self.lambda_ else None,
+        }
