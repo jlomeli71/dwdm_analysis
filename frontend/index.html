@@ -6,7 +6,8 @@
   <title>DWDM Topology — Red ISP Tx</title>
   <meta name="description" content="Aplicación de gestión y visualización de topología DWDM para ISP México — Red ISP Tx" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <!-- D3.js para grafo de topología -->
   <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <!-- Chart.js para dashboards -->
@@ -16,11 +17,15 @@
 <body>
   <!-- Aplicar tema guardado antes de pintar (evita destello) -->
   <script>if(localStorage.getItem('theme')==='light')document.body.classList.add('light');</script>
+  <!-- Grain overlay: textura sutil sobre el fondo (pointer-events-none) -->
+  <div class="grain-overlay" aria-hidden="true"></div>
 
   <!-- ── Top Nav ───────────────────────────────────────────────────────────── -->
   <header class="topnav" id="topnav">
     <div class="topnav-brand">
-      <span class="logo-icon">⬡</span>
+      <svg class="logo-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
       <div>
         <div class="logo-title">DWDM</div>
         <div class="logo-sub">Red ISP Tx</div>
@@ -29,40 +34,43 @@
 
     <nav class="topnav-nav">
       <a class="nav-item active" data-page="topology" href="#topology">
-        <span class="nav-icon">🗺</span>
+        <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M8.5 17.5l-2-2M15.5 17.5l2-2M9 13l-2 4M15 13l2 4"/></svg>
         <span class="nav-label">Topología</span>
       </a>
       <a class="nav-item" data-page="crud" href="#crud">
-        <span class="nav-icon">🗄</span>
+        <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>
         <span class="nav-label">Sitios &amp; Lambdas</span>
       </a>
       <a class="nav-item" data-page="dashboard" href="#dashboard">
-        <span class="nav-icon">📊</span>
+        <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="13" width="4" height="8" rx="1"/><rect x="10" y="9" width="4" height="12" rx="1"/><rect x="17" y="5" width="4" height="16" rx="1"/></svg>
         <span class="nav-label">Dashboard</span>
       </a>
       <a class="nav-item" data-page="simulation" href="#simulation">
-        <span class="nav-icon">⚡</span>
+        <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
         <span class="nav-label">Simulación</span>
       </a>
       <a class="nav-item" data-page="reports" href="#reports">
-        <span class="nav-icon">📄</span>
+        <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
         <span class="nav-label">Reportes</span>
       </a>
       <a class="nav-item nav-item--external" id="nav-admin-db" href="#" target="_blank" rel="noopener" title="Abrir explorador de base de datos en nueva pestaña">
-        <span class="nav-icon">🗃</span>
+        <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
         <span class="nav-label">Admin BD</span>
       </a>
       <a class="nav-item" data-page="isp" href="#isp">
-        <span class="nav-icon">🌐</span>
+        <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
         <span class="nav-label">Capa IP/ISP</span>
       </a>
       <a class="nav-item" data-page="help" href="#help">
-        <span class="nav-icon">?</span>
+        <svg class="nav-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
         <span class="nav-label">Ayuda</span>
       </a>
     </nav>
 
-    <button id="theme-toggle" title="Modo claro"><span id="theme-icon">☀️</span><span id="theme-label">Claro</span></button>
+    <button id="theme-toggle" title="Modo claro">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="theme-icon" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      <span id="theme-label">Claro</span>
+    </button>
 
     <div class="topnav-info">
       Red óptica ISP · C-band 96ch · Ciena &amp; Infinera
@@ -134,9 +142,12 @@
     const themeBtn   = document.getElementById('theme-toggle');
     const themeIcon  = document.getElementById('theme-icon');
     const themeLabel = document.getElementById('theme-label');
+    // SVG paths: sun (dark mode) vs moon (light mode)
+    const SVG_SUN  = '<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>';
+    const SVG_MOON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
     function syncThemeBtn() {
       const isLight = document.body.classList.contains('light');
-      themeIcon.textContent  = isLight ? '🌙' : '☀️';
+      themeIcon.innerHTML    = isLight ? SVG_MOON : SVG_SUN;
       themeLabel.textContent = isLight ? 'Oscuro' : 'Claro';
       themeBtn.title = isLight ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro';
     }
