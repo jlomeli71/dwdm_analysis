@@ -13,6 +13,15 @@ const CLOUD_H     = 52;   // alto de la nube ISP
 // ── Estado del módulo ─────────────────────────────────────────────────────────
 let routers = [], providers = [], flows = [], lambdas = [];
 let simulation = null;
+let _ispAllNodes = []; // referencia a los nodos activos para guardar posiciones
+
+const ISP_POS_KEY = "isp-graph-positions";
+
+function _saveISPPositions() {
+  const pos = {};
+  _ispAllNodes.forEach(n => { if (n.x != null) pos[n.id] = { x: Math.round(n.x), y: Math.round(n.y) }; });
+  try { localStorage.setItem(ISP_POS_KEY, JSON.stringify(pos)); } catch {}
+}
 
 export async function renderISPLayer(container) {
   container.innerHTML = `<div class="isp-page">
@@ -23,6 +32,8 @@ export async function renderISPLayer(container) {
       </div>
       <div class="isp-toolbar-actions">
         <button class="btn-tool active" id="isp-btn-graph">Grafo lógico</button>
+        <button class="btn-tool" id="isp-btn-save-pos" title="Guardar posiciones de nodos">💾 Guardar posiciones</button>
+        <button class="btn-tool" id="isp-btn-reset-pos" title="Restablecer layout automático">↺ Restablecer layout</button>
         <button class="btn-tool" id="isp-btn-reload" title="Recargar datos">↺ Actualizar</button>
       </div>
     </div>
@@ -90,6 +101,19 @@ export async function renderISPLayer(container) {
     lagGrouped = !lagGrouped;
     e.currentTarget.classList.toggle("active", lagGrouped);
     renderCapacityMatrix(lagGrouped);
+  });
+
+  // Guardar posiciones manualmente + toast
+  document.getElementById("isp-btn-save-pos")?.addEventListener("click", () => {
+    _saveISPPositions();
+    const btn = document.getElementById("isp-btn-save-pos");
+    if (btn) { btn.textContent = "✓ Guardado"; setTimeout(() => { btn.textContent = "💾 Guardar posiciones"; }, 2000); }
+  });
+
+  // Restablecer layout: borrar posiciones guardadas y re-renderizar grafo
+  document.getElementById("isp-btn-reset-pos")?.addEventListener("click", () => {
+    try { localStorage.removeItem(ISP_POS_KEY); } catch {}
+    renderGraph();
   });
 
   document.getElementById("isp-btn-reload")?.addEventListener("click", async () => {
@@ -180,8 +204,17 @@ function renderGraph() {
   });
 
   const allNodes = [...routerNodes, ...ispNodes];
+  _ispAllNodes = allNodes; // exponer para el botón de guardar
   const nodeById = {};
   allNodes.forEach(n => { nodeById[n.id] = n; });
+
+  // ── Cargar posiciones guardadas ───────────────────────────────────────────
+  let savedISPPos = {};
+  try { savedISPPos = JSON.parse(localStorage.getItem(ISP_POS_KEY) || "{}"); } catch {}
+  allNodes.forEach(n => {
+    const s = savedISPPos[n.id];
+    if (s) { n.x = s.x; n.y = s.y; n.fx = s.x; n.fy = s.y; }
+  });
 
   // ── Construir enlaces ────────────────────────────────────────────────────
   const links = [];
@@ -273,10 +306,34 @@ function renderGraph() {
   // ── Dibujar nodos ────────────────────────────────────────────────────────
   const nodeG = g.append("g").attr("class", "isp-nodes");
 
+  // Fijar todos los nodos cuando la simulación termina de acomodarlos
+  simulation.on("end", () => {
+    allNodes.forEach(n => { n.fx = n.x; n.fy = n.y; });
+  });
+
   const drag = d3.drag()
-    .on("start", (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-    .on("drag",  (e, d) => { d.fx = e.x; d.fy = e.y; })
-    .on("end",   (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; });
+    .on("start", function(_e, _d) {
+      // Detener la simulación y anclar todos los nodos
+      simulation.alphaTarget(0).stop();
+      allNodes.forEach(n => { n.fx = n.x; n.fy = n.y; });
+    })
+    .on("drag", function(e, d) {
+      // Actualizar posición del nodo arrastrado directamente en el DOM
+      d.x = e.x; d.y = e.y; d.fx = e.x; d.fy = e.y;
+      d3.select(this).attr("transform", `translate(${e.x},${e.y})`);
+      // Actualizar solo las líneas conectadas a este nodo
+      linkSel.each(function(l) {
+        if (l.source === d || l.target === d) {
+          d3.select(this)
+            .attr("x1", l.source.x).attr("y1", l.source.y)
+            .attr("x2", l.target.x).attr("y2", l.target.y);
+        }
+      });
+    })
+    .on("end", function() {
+      // Los nodos quedan fijos; auto-guardar posiciones en localStorage
+      _saveISPPositions();
+    });
 
   const nodeSel = nodeG.selectAll("g.isp-node").data(allNodes).join("g")
     .attr("class", "isp-node")
@@ -315,11 +372,10 @@ function renderGraph() {
       .attr("rx", CLOUD_W / 2)
       .attr("ry", CLOUD_H / 2)
       .attr("fill", d.color)
-      .attr("fill-opacity", 0.20)
       .attr("stroke", d.color)
-      .attr("stroke-width", 2);
+      .attr("stroke-width", 1.5);
     sel.append("text").attr("dy", 4).attr("text-anchor", "middle")
-      .attr("font-size", "9.5").attr("font-weight", "700").attr("fill", d.color)
+      .attr("font-size", "9.5").attr("font-weight", "700").attr("fill", "#ffffff")
       .text(d.providerName);
     sel.append("text").attr("dy", CLOUD_H / 2 + 13).attr("text-anchor", "middle")
       .attr("font-size", "9").attr("fill", "var(--text-muted)").text(d.siteId);

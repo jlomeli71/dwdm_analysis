@@ -137,34 +137,43 @@ export async function renderSimulation(container) {
     ispProvSel.appendChild(opt);
   });
 
-  // Al cambiar proveedor ISP → filtrar sitios que tienen interfaces de ese proveedor
-  ispProvSel.addEventListener('change', () => {
-    const prov = ispProvSel.value;
+  // Rellena el selector de sitio según el proveedor activo y el modo de etiqueta
+  function repopulateSiteSel() {
+    const prov    = ispProvSel.value;
     const siteSel = document.getElementById('sim-isp-site-select');
+    const current = siteSel.value; // preservar selección si sigue siendo válida
     siteSel.innerHTML = '<option value="">— Seleccionar sitio —</option>';
-    siteSel.disabled = !prov;
-    if (prov) {
-      // Buscar sitios que tengan interfaces ISP del proveedor seleccionado
-      const sites = [...new Set(
-        ispRouters
-          .filter(r => r.interfaces?.some(i => i.iface_type === 'isp' && i.isp_provider_name === prov))
-          .map(r => r.site_id)
-      )];
-      sites.forEach(sid => {
-        const opt = document.createElement('option');
-        opt.value = sid;
-        opt.textContent = sid;
-        siteSel.appendChild(opt);
-      });
-      if (sites.length === 0) {
-        document.getElementById('isp-sim-info').textContent =
-          'Sin interfaces configuradas para este proveedor.';
-      } else {
-        document.getElementById('isp-sim-info').textContent = '';
-      }
+    siteSel.disabled  = !prov;
+    if (!prov) { updateSimBtn(); return; }
+
+    const matchedRouters = ispRouters.filter(r =>
+      r.interfaces?.some(i => i.iface_type === 'isp' && i.isp_provider_name === prov)
+    );
+    const sites = [...new Map(matchedRouters.map(r => [r.site_id, r])).values()];
+
+    sites.forEach(r => {
+      const opt       = document.createElement('option');
+      opt.value       = r.site_id;
+      opt.textContent = _simLabel === 'name'
+        ? `${r.site_name} (${r.site_id})`
+        : r.site_id;
+      siteSel.appendChild(opt);
+    });
+
+    // Restaurar selección previa si sigue existiendo
+    if (current && sites.some(r => r.site_id === current)) siteSel.value = current;
+
+    if (sites.length === 0) {
+      document.getElementById('isp-sim-info').textContent =
+        'Sin interfaces configuradas para este proveedor.';
+    } else {
+      document.getElementById('isp-sim-info').textContent = '';
     }
     updateSimBtn();
-  });
+  }
+
+  // Al cambiar proveedor ISP → filtrar sitios
+  ispProvSel.addEventListener('change', repopulateSiteSel);
 
   document.getElementById('sim-isp-site-select').addEventListener('change', () => {
     const prov = ispProvSel.value;
@@ -195,6 +204,7 @@ export async function renderSimulation(container) {
     const filter = document.getElementById('sim-seg-search')?.value.toLowerCase() || '';
     renderSegList(filter);
     renderSelectedSegs();
+    repopulateSiteSel(); // actualizar etiquetas del selector de sitio de ingreso
     if (lastResult) renderResults(lastResult,
       document.querySelector('#sim-mode-toggle button.active')?.dataset.mode);
   });

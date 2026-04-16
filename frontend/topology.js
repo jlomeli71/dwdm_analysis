@@ -188,24 +188,22 @@ export async function renderTopology(container) {
       }
       _renderISPOverlay(ispRouters);
     } else {
-      document.querySelectorAll(".router-isp-badge").forEach(el => el.remove());
+      document.querySelectorAll(".router-isp-badge, .router-conn-line, .isp-cloud-badge, .isp-cloud-line").forEach(e => e.remove());
     }
   });
 
   function _renderISPOverlay(rtrData) {
-    // Eliminar badges previos (inyectados como hijos de cada .node-group)
-    document.querySelectorAll(".router-isp-badge").forEach(el => el.remove());
+    // Limpiar overlay previo
+    document.querySelectorAll(".router-isp-badge, .router-conn-line, .isp-cloud-badge, .isp-cloud-line").forEach(e => e.remove());
 
     const BRAND_COLOR_LOCAL = { cisco: "#2563EB", juniper: "#16A34A", cirion: "#8B5CF6" };
     const rtrBySite = Object.fromEntries(rtrData.map(r => [r.site_id, r]));
 
-    // Posiciones guardadas de badges (drag independiente)
     let savedOffsets = {};
     try { savedOffsets = JSON.parse(localStorage.getItem('isp-badge-offsets') || '{}'); } catch {}
+    let savedCloudOffsets = {};
+    try { savedCloudOffsets = JSON.parse(localStorage.getItem('isp-cloud-offsets') || '{}'); } catch {}
 
-    // Adjuntar el badge directamente al .node-group de D3.
-    // Al estar dentro del grupo hereda su transform="translate(x,y)" y se mueve
-    // automáticamente con el nodo al hacer drag o al cambiar entre grafo y mapa.
     document.querySelectorAll(".node-group").forEach(el => {
       const datum = el.__data__;
       if (!datum?.id) return;
@@ -213,96 +211,151 @@ export async function renderTopology(container) {
       if (!rtr) return;
 
       const color  = BRAND_COLOR_LOCAL[rtr.brand] || "#888";
-      const arm    = 6;          // radio del símbolo X
-      const nodeR  = 14;         // radio del nodo DWDM (mismo que en drawNode)
-      const defDx  = nodeR + 16; // posición por defecto: al lado derecho del nodo
+      const arm    = 6;
+      const nodeR  = 14;
+      const defDx  = nodeR + 16;
       const offset = savedOffsets[datum.id] || { dx: defDx, dy: 0 };
 
+      // ── Línea nodo DWDM → ruteador ────────────────────────────────────────
+      const connLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      connLine.setAttribute("class", "router-conn-line");
+      connLine.setAttribute("x1", "0"); connLine.setAttribute("y1", "0");
+      connLine.setAttribute("x2", String(offset.dx)); connLine.setAttribute("y2", String(offset.dy));
+      connLine.setAttribute("stroke", color);
+      connLine.setAttribute("stroke-width", "1.5");
+      connLine.setAttribute("stroke-dasharray", "4,3");
+      connLine.setAttribute("opacity", "0.75");
+      el.appendChild(connLine);
+
+      // ── Badge ruteador (solo círculo + X) ────────────────────────────────
       const badge = document.createElementNS("http://www.w3.org/2000/svg", "g");
       badge.setAttribute("class", "router-isp-badge");
       badge.setAttribute("cursor", "grab");
       badge.setAttribute("transform", `translate(${offset.dx},${offset.dy})`);
 
-      // Círculo de router — separado del nodo DWDM
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("r", "10"); circle.setAttribute("fill", color);
       circle.setAttribute("stroke", "#fff"); circle.setAttribute("stroke-width", "1.5");
       circle.setAttribute("opacity", "0.9");
       badge.appendChild(circle);
 
-      // Símbolo X (ruteador) — líneas diagonales en lugar de cruz +
-      [[-arm, -arm, arm, arm], [arm, -arm, -arm, arm]].forEach(([x1, y1, x2, y2]) => {
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        line.setAttribute("x1", x1); line.setAttribute("y1", y1);
-        line.setAttribute("x2", x2); line.setAttribute("y2", y2);
-        line.setAttribute("stroke", "#fff"); line.setAttribute("stroke-width", "2");
-        line.setAttribute("stroke-linecap", "round");
-        badge.appendChild(line);
+      [[-arm,-arm,arm,arm],[arm,-arm,-arm,arm]].forEach(([x1,y1,x2,y2]) => {
+        const ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        ln.setAttribute("x1",x1); ln.setAttribute("y1",y1);
+        ln.setAttribute("x2",x2); ln.setAttribute("y2",y2);
+        ln.setAttribute("stroke","#fff"); ln.setAttribute("stroke-width","2");
+        ln.setAttribute("stroke-linecap","round");
+        badge.appendChild(ln);
       });
 
-      // Nubes ISP: una elipse por proveedor, distribuidas radialmente desde el badge
+      // ── Elipses ISP: grupos independientes arrastrables ───────────────────
       const ispIfaces = rtr.interfaces.filter(i => i.iface_type === "isp");
       const provsSeen = new Set();
       let provIdx = 0;
+      const siteCloudSaved = savedCloudOffsets[datum.id] || {};
+
+      // Acumular referencias a las cloud-lines para actualizarlas cuando se mueva el badge
+      const cloudLines = [];
+
       ispIfaces.forEach(iface => {
         if (provsSeen.has(iface.isp_provider_id)) return;
         provsSeen.add(iface.isp_provider_id);
         const total = [...new Set(ispIfaces.map(i => i.isp_provider_id))].length;
         const angle = (provIdx / total) * Math.PI * 2 - Math.PI / 2;
-        const dist  = 42;
-        const cx    = Math.cos(angle) * dist;
-        const cy    = Math.sin(angle) * dist;
+        const dist  = 46;
         provIdx++;
 
-        // Línea de conexión badge → elipse ISP
-        const ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        ln.setAttribute("x1", "0"); ln.setAttribute("y1", "0");
-        ln.setAttribute("x2", cx);  ln.setAttribute("y2", cy);
-        ln.setAttribute("stroke", iface.isp_provider_color || "#888");
-        ln.setAttribute("stroke-width", "1.5"); ln.setAttribute("stroke-dasharray", "3,2");
-        ln.setAttribute("opacity", "0.75");
-        badge.appendChild(ln);
+        // Posición absoluta del cloud en coordenadas del node-group
+        const relX = Math.cos(angle) * dist;
+        const relY = Math.sin(angle) * dist;
+        const sc   = siteCloudSaved[iface.isp_provider_id];
+        const absX = sc ? sc.dx : offset.dx + relX;
+        const absY = sc ? sc.dy : offset.dy + relY;
 
-        // Elipse proveedor ISP
+        // Línea ruteador → cloud (en node-group space, sibling de badge)
+        const cloudLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        cloudLine.setAttribute("class", "isp-cloud-line");
+        cloudLine.setAttribute("x1", String(offset.dx)); cloudLine.setAttribute("y1", String(offset.dy));
+        cloudLine.setAttribute("x2", String(absX));      cloudLine.setAttribute("y2", String(absY));
+        cloudLine.setAttribute("stroke", iface.isp_provider_color || "#888");
+        cloudLine.setAttribute("stroke-width", "1.5");
+        cloudLine.setAttribute("stroke-dasharray", "3,2");
+        cloudLine.setAttribute("opacity", "0.75");
+        el.appendChild(cloudLine);
+        cloudLines.push(cloudLine);
+
+        // Grupo cloud (arrastrable independiente)
+        const cloudGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        cloudGroup.setAttribute("class", "isp-cloud-badge");
+        cloudGroup.setAttribute("cursor", "grab");
+        cloudGroup.setAttribute("transform", `translate(${absX},${absY})`);
+
         const ell = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
-        ell.setAttribute("cx", cx); ell.setAttribute("cy", cy);
-        ell.setAttribute("rx", "16"); ell.setAttribute("ry", "9");
+        ell.setAttribute("cx","0"); ell.setAttribute("cy","0");
+        ell.setAttribute("rx","16"); ell.setAttribute("ry","9");
         ell.setAttribute("fill", iface.isp_provider_color || "#888");
-        ell.setAttribute("fill-opacity", "0.18");
         ell.setAttribute("stroke", iface.isp_provider_color || "#888");
-        ell.setAttribute("stroke-width", "1.5");
-        badge.appendChild(ell);
+        ell.setAttribute("stroke-width","1");
+        cloudGroup.appendChild(ell);
 
-        // Etiqueta proveedor
         const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        txt.setAttribute("x", cx); txt.setAttribute("y", cy + 3.5);
-        txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", "6");
-        txt.setAttribute("fill", iface.isp_provider_color || "#888");
-        txt.setAttribute("font-weight", "700");
+        txt.setAttribute("x","0"); txt.setAttribute("y","3.5");
+        txt.setAttribute("text-anchor","middle"); txt.setAttribute("font-size","6");
+        txt.setAttribute("fill","#ffffff"); txt.setAttribute("font-weight","700");
         txt.textContent = (iface.isp_provider_name || "ISP").substring(0, 8);
-        badge.appendChild(txt);
-      });
+        cloudGroup.appendChild(txt);
 
-      // Drag independiente: mueve solo el badge (no el nodo DWDM)
-      d3.select(badge).call(
-        d3.drag()
-          .on("start", event => { event.sourceEvent.stopPropagation(); })
-          .on("drag", event => {
-            const t = badge.getAttribute("transform").match(/translate\(([^,]+),([^)]+)\)/);
-            const curDx = t ? parseFloat(t[1]) : defDx;
-            const curDy = t ? parseFloat(t[2]) : 0;
-            badge.setAttribute("transform", `translate(${curDx + event.dx},${curDy + event.dy})`);
+        // Drag del cloud — mueve solo esta elipse, actualiza su cloudLine
+        const pid = iface.isp_provider_id;
+        d3.select(cloudGroup).call(d3.drag()
+          .on("start", ev => { ev.sourceEvent.stopPropagation(); })
+          .on("drag", ev => {
+            const t  = cloudGroup.getAttribute("transform").match(/translate\(([^,]+),([^)]+)\)/);
+            const nx = (t ? parseFloat(t[1]) : absX) + ev.dx;
+            const ny = (t ? parseFloat(t[2]) : absY) + ev.dy;
+            cloudGroup.setAttribute("transform", `translate(${nx},${ny})`);
+            cloudLine.setAttribute("x2", String(nx));
+            cloudLine.setAttribute("y2", String(ny));
           })
           .on("end", () => {
-            const t = badge.getAttribute("transform").match(/translate\(([^,]+),([^)]+)\)/);
-            const finalDx = t ? parseFloat(t[1]) : defDx;
-            const finalDy = t ? parseFloat(t[2]) : 0;
+            const t  = cloudGroup.getAttribute("transform").match(/translate\(([^,]+),([^)]+)\)/);
+            const fx = t ? parseFloat(t[1]) : absX;
+            const fy = t ? parseFloat(t[2]) : absY;
             try {
-              const offsets = JSON.parse(localStorage.getItem('isp-badge-offsets') || '{}');
-              offsets[datum.id] = { dx: finalDx, dy: finalDy };
-              localStorage.setItem('isp-badge-offsets', JSON.stringify(offsets));
+              const co = JSON.parse(localStorage.getItem('isp-cloud-offsets') || '{}');
+              if (!co[datum.id]) co[datum.id] = {};
+              co[datum.id][pid] = { dx: fx, dy: fy };
+              localStorage.setItem('isp-cloud-offsets', JSON.stringify(co));
             } catch {}
           })
+        );
+
+        el.appendChild(cloudGroup);
+      });
+
+      // ── Drag del badge ruteador ───────────────────────────────────────────
+      // Actualiza connLine y el extremo origen (x1/y1) de todas las cloud-lines
+      d3.select(badge).call(d3.drag()
+        .on("start", ev => { ev.sourceEvent.stopPropagation(); })
+        .on("drag", ev => {
+          const t   = badge.getAttribute("transform").match(/translate\(([^,]+),([^)]+)\)/);
+          const ndx = (t ? parseFloat(t[1]) : defDx) + ev.dx;
+          const ndy = (t ? parseFloat(t[2]) : 0)     + ev.dy;
+          badge.setAttribute("transform", `translate(${ndx},${ndy})`);
+          connLine.setAttribute("x2", String(ndx));
+          connLine.setAttribute("y2", String(ndy));
+          cloudLines.forEach(cl => { cl.setAttribute("x1", String(ndx)); cl.setAttribute("y1", String(ndy)); });
+        })
+        .on("end", () => {
+          const t   = badge.getAttribute("transform").match(/translate\(([^,]+),([^)]+)\)/);
+          const fdx = t ? parseFloat(t[1]) : defDx;
+          const fdy = t ? parseFloat(t[2]) : 0;
+          try {
+            const off = JSON.parse(localStorage.getItem('isp-badge-offsets') || '{}');
+            off[datum.id] = { dx: fdx, dy: fdy };
+            localStorage.setItem('isp-badge-offsets', JSON.stringify(off));
+          } catch {}
+        })
       );
 
       el.appendChild(badge);
@@ -408,6 +461,15 @@ function renderForceGraph(g, nodes, links, W, H, zoom, d3svg) {
   const unlocated = document.getElementById("unlocated-panel");
   unlocated && (unlocated.style.display = "none");
 
+  // ── Cargar posiciones guardadas del grafo lógico ──────────────────────────
+  const GRAPH_POS_KEY = "dwdm-graph-positions";
+  let savedGraphPos = {};
+  try { savedGraphPos = JSON.parse(localStorage.getItem(GRAPH_POS_KEY) || "{}"); } catch {}
+  nodes.forEach(n => {
+    const s = savedGraphPos[n.id];
+    if (s) { n.x = s.x; n.y = s.y; n.fx = s.x; n.fy = s.y; }
+  });
+
   const LINE_SPACING = 4; // px de separación entre lambdas paralelas
 
   // ── Por cada enlace, qué lambdas lo usan ─────────────────────────────────
@@ -481,7 +543,8 @@ function renderForceGraph(g, nodes, links, W, H, zoom, d3svg) {
       .on("drag",  (event, d) => { d.fx = event.x; d.fy = event.y; })
       .on("end",   (event, _d) => {
         if (!event.active) sim.alphaTarget(0);
-        // El nodo queda fijo donde el usuario lo dejó; los demás ya estaban anclados
+        // El nodo queda fijo donde el usuario lo dejó
+        _saveGraphPositions();
       })
     )
     .on("mouseover", (event, d) => showNodeTooltip(event, d))
@@ -535,6 +598,28 @@ function renderForceGraph(g, nodes, links, W, H, zoom, d3svg) {
     d3svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity);
     sim.alpha(0.5).restart();
   };
+
+  // ── Botón Guardar posiciones (modo grafo) ─────────────────────────────────
+  function _saveGraphPositions() {
+    const pos = {};
+    nodes.forEach(n => { if (n.x != null) pos[n.id] = { x: Math.round(n.x), y: Math.round(n.y) }; });
+    try { localStorage.setItem(GRAPH_POS_KEY, JSON.stringify(pos)); } catch {}
+  }
+
+  const btnSaveGraph = document.getElementById("btn-save-coords");
+  if (btnSaveGraph) {
+    btnSaveGraph.style.display = "";
+    btnSaveGraph.disabled = false;
+    btnSaveGraph.textContent = "💾 Guardar posiciones";
+    btnSaveGraph.onclick = () => {
+      _saveGraphPositions();
+      const status = document.getElementById("topo-status");
+      if (status) {
+        status.textContent = "✓ Posiciones guardadas";
+        setTimeout(() => { status.textContent = ""; }, 2500);
+      }
+    };
+  }
 }
 
 async function loadMexicoGeo() {

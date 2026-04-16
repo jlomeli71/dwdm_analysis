@@ -48,14 +48,30 @@ export const API = {
   // Reports (returns URL for download)
   reportUrl: name => `${BASE}/reports/${name}`,
 
-  // ISP Layer
-  getRouters:               ()         => request("GET", "/routers"),
-  updateRouterInterface:    (id, body) => request("PUT", `/router-interfaces/${id}`, body),
-  getISPProviders:       ()         => request("GET", "/isp-providers"),
-  getTrafficFlows:       ()         => request("GET", "/traffic-flows"),
-  updateTrafficFlow:     (id, body) => request("PUT", `/traffic-flows/${id}`, body),
-  simulateISPProvider:   body       => request("POST", "/simulation/isp-provider", body),
-  simulateLambdaTraffic: body       => request("POST", "/simulation/lambda-traffic", body),
+  // ISP Layer — Routers
+  getRouters:              ()         => request("GET",    "/routers"),
+  createRouter:            body       => request("POST",   "/routers", body),
+  updateRouter:            (id, body) => request("PUT",    `/routers/${id}`, body),
+  deleteRouter:            id         => request("DELETE", `/routers/${id}`),
+
+  // ISP Layer — Interfaces de ruteador
+  createRouterInterface:   body       => request("POST",   "/router-interfaces", body),
+  updateRouterInterface:   (id, body) => request("PUT",    `/router-interfaces/${id}`, body),
+  deleteRouterInterface:   id         => request("DELETE", `/router-interfaces/${id}`),
+
+  // ISP Layer — Proveedores ISP
+  getISPProviders:         ()         => request("GET",    "/isp-providers"),
+  createISPProvider:       body       => request("POST",   "/isp-providers", body),
+  updateISPProvider:       (id, body) => request("PUT",    `/isp-providers/${id}`, body),
+  deleteISPProvider:       id         => request("DELETE", `/isp-providers/${id}`),
+
+  // ISP Layer — Flujos de tráfico
+  getTrafficFlows:         ()         => request("GET",    "/traffic-flows"),
+  updateTrafficFlow:       (id, body) => request("PUT",    `/traffic-flows/${id}`, body),
+
+  // ISP Layer — Simulación
+  simulateISPProvider:     body       => request("POST", "/simulation/isp-provider", body),
+  simulateLambdaTraffic:   body       => request("POST", "/simulation/lambda-traffic", body),
 
   // Utilización mensual (Excel import)
   uploadLambdaUtilization: (file) => {

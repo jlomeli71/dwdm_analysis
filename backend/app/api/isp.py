@@ -2,7 +2,7 @@
 from collections import Counter
 from flask import Blueprint, request, jsonify
 from ..extensions import db
-from ..models import Router, ISPProvider, RouterInterface, TrafficFlow, LambdaUtilization, Lambda
+from ..models import Router, ISPProvider, RouterInterface, TrafficFlow, LambdaUtilization, Lambda, Site
 
 bp = Blueprint("isp", __name__)
 
@@ -33,6 +33,91 @@ def get_routers():
     return jsonify([r.to_dict(include_interfaces=True) for r in routers])
 
 
+@bp.post("/routers")
+def create_router():
+    data = request.get_json(silent=True) or {}
+    site_id = (data.get("site_id") or "").strip()
+    name    = (data.get("name") or "").strip()
+    brand   = (data.get("brand") or "").strip().lower()
+
+    if not site_id or not name or not brand:
+        return jsonify({"error": "site_id, name y brand son obligatorios"}), 422
+    if brand not in ("cisco", "juniper", "cirion"):
+        return jsonify({"error": "brand debe ser 'cisco', 'juniper' o 'cirion'"}), 422
+    if not Site.query.get(site_id):
+        return jsonify({"error": f"El sitio '{site_id}' no existe"}), 404
+    if Router.query.filter_by(site_id=site_id).first():
+        return jsonify({"error": f"Ya existe un ruteador en el sitio '{site_id}'"}), 409
+
+    router = Router(site_id=site_id, name=name, brand=brand)
+    db.session.add(router)
+    db.session.commit()
+    return jsonify(router.to_dict(include_interfaces=True)), 201
+
+
+@bp.put("/routers/<int:router_id>")
+def update_router(router_id):
+    router = Router.query.get_or_404(router_id)
+    data   = request.get_json(silent=True) or {}
+    name   = (data.get("name") or "").strip()
+    brand  = (data.get("brand") or "").strip().lower()
+
+    if name:
+        router.name = name
+    if brand:
+        if brand not in ("cisco", "juniper", "cirion"):
+            return jsonify({"error": "brand debe ser 'cisco', 'juniper' o 'cirion'"}), 422
+        router.brand = brand
+
+    db.session.commit()
+    return jsonify(router.to_dict(include_interfaces=True))
+
+
+@bp.delete("/routers/<int:router_id>")
+def delete_router(router_id):
+    router = Router.query.get_or_404(router_id)
+    # Las interfaces se eliminan en cascada (cascade="all, delete-orphan")
+    db.session.delete(router)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@bp.post("/router-interfaces")
+def create_router_interface():
+    data       = request.get_json(silent=True) or {}
+    router_id  = data.get("router_id")
+    name       = (data.get("name") or "").strip()
+    iface_type = (data.get("iface_type") or "").strip().lower()
+
+    if not router_id or not name or not iface_type:
+        return jsonify({"error": "router_id, name e iface_type son obligatorios"}), 422
+    if iface_type not in ("lambda", "isp"):
+        return jsonify({"error": "iface_type debe ser 'lambda' o 'isp'"}), 422
+    if not Router.query.get(router_id):
+        return jsonify({"error": f"Ruteador {router_id} no existe"}), 404
+
+    iface = RouterInterface(
+        router_id       = router_id,
+        name            = name,
+        iface_type      = iface_type,
+        capacity_gbps   = int(data.get("capacity_gbps", 100)),
+        lambda_id       = data.get("lambda_id"),
+        isp_provider_id = data.get("isp_provider_id"),
+        isis_metric     = int(data.get("isis_metric", 10)) if iface_type == "lambda" else None,
+    )
+    db.session.add(iface)
+    db.session.commit()
+    return jsonify(iface.to_dict()), 201
+
+
+@bp.delete("/router-interfaces/<int:iface_id>")
+def delete_router_interface(iface_id):
+    iface = RouterInterface.query.get_or_404(iface_id)
+    db.session.delete(iface)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 @bp.put("/router-interfaces/<int:iface_id>")
 def update_router_interface(iface_id):
     """Actualiza la métrica ISIS de una interfaz lambda (Cisco/Juniper)."""
@@ -57,6 +142,61 @@ def update_router_interface(iface_id):
 def get_isp_providers():
     providers = ISPProvider.query.order_by(ISPProvider.name).all()
     return jsonify([p.to_dict() for p in providers])
+
+
+@bp.post("/isp-providers")
+def create_isp_provider():
+    data  = request.get_json(silent=True) or {}
+    name  = (data.get("name") or "").strip()
+    color = (data.get("color") or "").strip()
+
+    if not name or not color:
+        return jsonify({"error": "name y color son obligatorios"}), 422
+    if not color.startswith("#") or len(color) != 7:
+        return jsonify({"error": "color debe ser un hex de 7 caracteres (#RRGGBB)"}), 422
+    if ISPProvider.query.filter_by(name=name).first():
+        return jsonify({"error": f"Ya existe un proveedor llamado '{name}'"}), 409
+
+    prov = ISPProvider(name=name, color=color)
+    db.session.add(prov)
+    db.session.commit()
+    return jsonify(prov.to_dict()), 201
+
+
+@bp.put("/isp-providers/<int:prov_id>")
+def update_isp_provider(prov_id):
+    prov  = ISPProvider.query.get_or_404(prov_id)
+    data  = request.get_json(silent=True) or {}
+    name  = (data.get("name") or "").strip()
+    color = (data.get("color") or "").strip()
+
+    if name and name != prov.name:
+        if ISPProvider.query.filter_by(name=name).first():
+            return jsonify({"error": f"Ya existe un proveedor llamado '{name}'"}), 409
+        prov.name = name
+    if color:
+        if not color.startswith("#") or len(color) != 7:
+            return jsonify({"error": "color debe ser un hex de 7 caracteres (#RRGGBB)"}), 422
+        prov.color = color
+
+    db.session.commit()
+    return jsonify(prov.to_dict())
+
+
+@bp.delete("/isp-providers/<int:prov_id>")
+def delete_isp_provider(prov_id):
+    prov = ISPProvider.query.get_or_404(prov_id)
+    iface_count = RouterInterface.query.filter_by(isp_provider_id=prov_id).count()
+    flow_count  = TrafficFlow.query.filter_by(isp_provider_id=prov_id).count()
+    if iface_count or flow_count:
+        return jsonify({
+            "error": f"No se puede eliminar: el proveedor tiene "
+                     f"{iface_count} interfaz(ces) y {flow_count} flujo(s) activos"
+        }), 409
+
+    db.session.delete(prov)
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 # ── Flujos de tráfico ─────────────────────────────────────────────────────────

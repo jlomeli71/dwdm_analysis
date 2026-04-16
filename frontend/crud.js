@@ -1,9 +1,11 @@
 /**
- * Módulo CRUD — Gestión de Sitios y Lambdas
+ * Módulo CRUD — Gestión de Sitios, Lambdas, Ruteadores y Proveedores ISP
  */
 import { API } from './api.js';
 
-let allSites = [], allLambdas = [];
+let allSites = [], allLambdas = [], allRouters = [], allISPProviders = [];
+// allLambdasForSelect: lista plana de lambdas para selects en modal de ruteador
+let allLambdasForSelect = [];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -37,8 +39,8 @@ export async function renderCrud(container) {
   container.innerHTML = `
     <div class="page-header">
       <div>
-        <div class="page-title">Gestión de Sitios y Lambdas</div>
-        <div class="page-subtitle">CRUD completo — Red ISP Tx</div>
+        <div class="page-title">Gestión de Red</div>
+        <div class="page-subtitle">Sitios · Lambdas · Ruteadores · Proveedores ISP</div>
       </div>
     </div>
 
@@ -49,6 +51,12 @@ export async function renderCrud(container) {
       </button>
       <button class="crud-tab" data-tab="lambdas" style="padding:10px 20px;font-weight:600;font-size:13px;color:var(--text-muted);border:none;background:none;cursor:pointer;">
         🔆 Lambdas
+      </button>
+      <button class="crud-tab" data-tab="routers" style="padding:10px 20px;font-weight:600;font-size:13px;color:var(--text-muted);border:none;background:none;cursor:pointer;">
+        🖧 Ruteadores
+      </button>
+      <button class="crud-tab" data-tab="ispproviders" style="padding:10px 20px;font-weight:600;font-size:13px;color:var(--text-muted);border:none;background:none;cursor:pointer;">
+        🌐 Proveedores ISP
       </button>
     </div>
 
@@ -98,9 +106,51 @@ export async function renderCrud(container) {
         </div>
       </div>
     </div>
+
+    <div id="routers-tab" style="display:none;">
+      <div class="toolbar">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="routers-search" placeholder="Buscar por nombre, sitio...">
+        </div>
+        <button class="btn btn-primary" id="btn-new-router">+ Nuevo Ruteador</button>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead><tr>
+              <th>Nombre</th><th>Sitio</th><th>Marca</th>
+              <th style="text-align:center">Interfaces</th><th>Acciones</th>
+            </tr></thead>
+            <tbody id="routers-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="ispproviders-tab" style="display:none;">
+      <div class="toolbar">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="ispprov-search" placeholder="Buscar por nombre...">
+        </div>
+        <button class="btn btn-primary" id="btn-new-ispprov">+ Nuevo Proveedor ISP</button>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead><tr>
+              <th>Color</th><th>Nombre</th><th>Acciones</th>
+            </tr></thead>
+            <tbody id="ispprov-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   `;
 
-  // Tab switching
+  // Tab switching — 4 tabs
+  const TAB_IDS = ["sites", "lambdas", "routers", "ispproviders"];
   document.querySelectorAll(".crud-tab").forEach(tab => {
     tab.addEventListener("click", () => {
       document.querySelectorAll(".crud-tab").forEach(t => {
@@ -111,19 +161,26 @@ export async function renderCrud(container) {
       tab.style.color = "var(--accent-blue)";
       tab.style.borderBottom = "2px solid var(--accent-blue)";
       tab.classList.add("active");
-      document.getElementById("sites-tab").style.display   = tab.dataset.tab === "sites"   ? "block" : "none";
-      document.getElementById("lambdas-tab").style.display = tab.dataset.tab === "lambdas" ? "block" : "none";
+      TAB_IDS.forEach(id => {
+        document.getElementById(`${id}-tab`).style.display = tab.dataset.tab === id ? "block" : "none";
+      });
     });
   });
 
   await loadSites();
   await loadLambdas();
+  await loadRouters();
+  await loadISPProviders();
 
   document.getElementById("sites-search").addEventListener("input", renderSitesTable);
   document.getElementById("sites-type-filter").addEventListener("change", renderSitesTable);
   document.getElementById("lambdas-search").addEventListener("input", renderLambdasTable);
+  document.getElementById("routers-search").addEventListener("input", renderRoutersTable);
+  document.getElementById("ispprov-search").addEventListener("input", renderISPProvidersTable);
   document.getElementById("btn-new-site").addEventListener("click", () => openSiteModal());
   document.getElementById("btn-new-lambda").addEventListener("click", () => openLambdaModal());
+  document.getElementById("btn-new-router").addEventListener("click", () => openRouterModal());
+  document.getElementById("btn-new-ispprov").addEventListener("click", () => openISPProviderModal());
 }
 
 async function loadSites() {
@@ -455,6 +512,367 @@ window._deleteLambda = async id => {
     await API.deleteLambda(id);
     showToast(`Lambda eliminada ✓`);
     await loadLambdas();
+  } catch(e) {
+    alert(e.error || "Error al eliminar.");
+  }
+};
+
+// ── RUTEADORES ────────────────────────────────────────────────────────────────
+
+async function loadRouters() {
+  try {
+    allRouters = await API.getRouters();
+    // Guardar lambdas planas para los selects de interfaces
+    if (!allLambdasForSelect.length) allLambdasForSelect = await API.getLambdas();
+  } catch { allRouters = []; }
+  renderRoutersTable();
+}
+
+function renderRoutersTable() {
+  const search = document.getElementById("routers-search")?.value.toLowerCase() || "";
+  const filtered = allRouters.filter(r =>
+    !search ||
+    r.name?.toLowerCase().includes(search) ||
+    r.site_id?.toLowerCase().includes(search) ||
+    r.site_name?.toLowerCase().includes(search)
+  );
+  const tbody = document.getElementById("routers-tbody");
+  if (!tbody) return;
+
+  const brandLabel = { cisco: "🔵 Cisco", juniper: "🟢 Juniper", cirion: "🟠 Cirion" };
+
+  tbody.innerHTML = filtered.map(r => {
+    const lambdaIfaces = (r.interfaces || []).filter(i => i.iface_type === "lambda").length;
+    const ispIfaces    = (r.interfaces || []).filter(i => i.iface_type === "isp").length;
+    return `
+      <tr>
+        <td><b>${r.name}</b></td>
+        <td>
+          <code style="font-size:12px;color:var(--accent-cyan)">${r.site_id}</code>
+          <span style="color:var(--text-muted);font-size:12px;"> — ${r.site_name || ''}</span>
+        </td>
+        <td>${brandLabel[r.brand] || r.brand}</td>
+        <td style="text-align:center">
+          <span class="badge badge-ok" title="Interfaces lambda">λ ${lambdaIfaces}</span>
+          <span class="badge badge-own" title="Interfaces ISP" style="margin-left:4px;">ISP ${ispIfaces}</span>
+        </td>
+        <td>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-secondary btn-sm btn-icon" onclick="window._editRouter(${r.id})" title="Editar">✏️</button>
+            <button class="btn btn-danger btn-sm btn-icon" onclick="window._deleteRouter(${r.id})" title="Eliminar">🗑</button>
+          </div>
+        </td>
+      </tr>`;
+  }).join("") || `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:40px">Sin resultados</td></tr>`;
+}
+
+// ── Router Modal ──────────────────────────────────────────────────────────────
+
+function openRouterModal(router = null) {
+  const isEdit   = !!router;
+  const ifaces   = router?.interfaces || [];
+  const ispProvs = allISPProviders;
+
+  function ifaceRowHTML(iface) {
+    const isLambda = (iface?.iface_type || "lambda") === "lambda";
+    const lambdaOpts = allLambdasForSelect.map(l =>
+      `<option value="${l.id}"${l.id === iface?.lambda_id ? " selected" : ""}>${l.name}</option>`
+    ).join("");
+    const ispOpts = ispProvs.map(p =>
+      `<option value="${p.id}"${p.id === iface?.isp_provider_id ? " selected" : ""}>${p.name}</option>`
+    ).join("");
+
+    return `<div class="iface-row" style="display:grid;grid-template-columns:1fr 80px 1fr 80px 34px;gap:6px;align-items:center;margin-bottom:6px;"
+        data-iface-id="${iface?.id || ''}">
+      <input class="iface-name" placeholder="Nombre (ej: Gi0/0/0)" value="${iface?.name || ''}" style="font-size:12px;">
+      <select class="iface-type" style="font-size:12px;">
+        <option value="lambda"${isLambda ? " selected" : ""}>Lambda</option>
+        <option value="isp"${!isLambda ? " selected" : ""}>ISP</option>
+      </select>
+      <select class="iface-ref" style="font-size:12px;">
+        <option value="">— ${isLambda ? "Lambda" : "Proveedor"} —</option>
+        ${isLambda ? lambdaOpts : ispOpts}
+      </select>
+      <input class="iface-metric" type="number" placeholder="Métrica ISIS" min="1" max="16777214"
+        value="${iface?.isis_metric ?? ''}" style="font-size:12px;" ${!isLambda ? "disabled style='opacity:0.4;font-size:12px;'" : ""}>
+      ${iface?.id
+        ? `<button type="button" class="btn btn-danger btn-sm iface-rm" data-id="${iface.id}" title="Eliminar" style="padding:0 8px;font-size:15px;line-height:1;">✕</button>`
+        : `<button type="button" class="btn btn-danger btn-sm iface-rm-new" title="Quitar" style="padding:0 8px;font-size:15px;line-height:1;">✕</button>`
+      }
+    </div>`;
+  }
+
+  // Precarga la lista de ISP providers si está vacía
+  const ispOptsGlobal = ispProvs.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+  const lambdaOptsGlobal = allLambdasForSelect.map(l => `<option value="${l.id}">${l.name}</option>`).join("");
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">${isEdit ? "✏️ Editar Ruteador" : "➕ Nuevo Ruteador"}</div>
+      <button class="btn btn-icon modal-cancel" style="font-size:18px;">✕</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto;max-height:calc(90vh - 130px);">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Sitio *</label>
+          <select id="f-rtr-site">
+            <option value="">— Seleccionar sitio —</option>
+            ${allSites.map(s => `<option value="${s.id}"${s.id === router?.site_id ? " selected" : ""}>${s.id} — ${s.name}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Marca *</label>
+          <select id="f-rtr-brand">
+            <option value="cisco"${router?.brand === "cisco" ? " selected" : ""}>🔵 Cisco</option>
+            <option value="juniper"${router?.brand === "juniper" ? " selected" : ""}>🟢 Juniper</option>
+            <option value="cirion"${router?.brand === "cirion" ? " selected" : ""}>🟠 Cirion</option>
+          </select>
+        </div>
+        <div class="form-group full">
+          <label>Nombre *</label>
+          <input id="f-rtr-name" value="${router?.name || ''}" placeholder="ej: MSOTOL01-RTR-01">
+        </div>
+      </div>
+
+      <!-- Interfaces -->
+      <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <label style="font-size:13px;font-weight:700;color:var(--text-primary);">🔌 Interfaces</label>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-iface">＋ Agregar interfaz</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 80px 1fr 80px 34px;gap:6px;padding-bottom:4px;
+            font-size:10px;font-weight:600;letter-spacing:0.5px;color:var(--text-muted);text-transform:uppercase;">
+          <span>Nombre</span><span>Tipo</span><span>Lambda / Proveedor</span><span>Métrica</span><span></span>
+        </div>
+        <div id="f-rtr-ifaces">
+          ${ifaces.map(i => ifaceRowHTML(i)).join("")}
+        </div>
+        ${ifaces.length === 0 ? `<p id="ifaces-empty" style="text-align:center;padding:16px 0;color:var(--text-muted);font-size:12px;">Sin interfaces.</p>` : ""}
+      </div>
+
+      <div id="f-rtr-error" class="form-error" style="margin-top:12px;display:none;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary modal-cancel">Cancelar</button>
+      <button class="btn btn-primary modal-submit">${isEdit ? "Guardar cambios" : "Crear ruteador"}</button>
+    </div>
+  `, async () => {
+    const errEl   = document.getElementById("f-rtr-error");
+    const siteId  = document.getElementById("f-rtr-site").value;
+    const brand   = document.getElementById("f-rtr-brand").value;
+    const name    = document.getElementById("f-rtr-name").value.trim();
+
+    if (!siteId || !name) {
+      errEl.textContent = "Sitio y nombre son obligatorios.";
+      errEl.style.display = "block";
+      return;
+    }
+
+    try {
+      let rtrId = router?.id;
+      if (isEdit) {
+        await API.updateRouter(rtrId, { name, brand });
+      } else {
+        const created = await API.createRouter({ site_id: siteId, name, brand });
+        rtrId = created.id;
+      }
+
+      // Guardar interfaces nuevas (sin id asignado aún)
+      const newIfaceRows = Array.from(
+        document.querySelectorAll('#f-rtr-ifaces .iface-row[data-iface-id=""]')
+      );
+      for (const row of newIfaceRows) {
+        const ifName  = row.querySelector(".iface-name").value.trim();
+        const ifType  = row.querySelector(".iface-type").value;
+        const refVal  = row.querySelector(".iface-ref").value;
+        const metric  = parseInt(row.querySelector(".iface-metric").value) || null;
+        if (!ifName) continue;
+        const body = {
+          router_id:  rtrId,
+          name:       ifName,
+          iface_type: ifType,
+          ...(ifType === "lambda" ? { lambda_id: refVal || null, isis_metric: metric } : { isp_provider_id: refVal || null }),
+        };
+        await API.createRouterInterface(body);
+      }
+
+      closeModal();
+      showToast(isEdit ? "Ruteador actualizado ✓" : "Ruteador creado ✓");
+      await loadRouters();
+    } catch(e) {
+      errEl.textContent = e.error || "Error al guardar.";
+      errEl.style.display = "block";
+    }
+  });
+
+  setTimeout(() => {
+    const modal = document.querySelector('#modal-overlay .modal');
+    if (modal) { modal.style.maxWidth = '820px'; modal.style.width = '95vw'; }
+
+    // Eliminar interfaz existente (via API)
+    document.getElementById('f-rtr-ifaces')?.addEventListener('click', async e => {
+      const btn = e.target.closest('.iface-rm');
+      if (btn) {
+        const ifaceId = parseInt(btn.dataset.id);
+        if (!confirm("¿Eliminar esta interfaz?")) return;
+        try {
+          await API.deleteRouterInterface(ifaceId);
+          btn.closest('.iface-row').remove();
+        } catch(err) {
+          alert(err.error || "Error al eliminar interfaz.");
+        }
+      }
+      // Quitar fila nueva (no guardada)
+      const btnNew = e.target.closest('.iface-rm-new');
+      if (btnNew) {
+        btnNew.closest('.iface-row').remove();
+      }
+    });
+
+    // Cambio de tipo en una fila nueva — actualizar opciones de la referencia
+    document.getElementById('f-rtr-ifaces')?.addEventListener('change', e => {
+      const sel = e.target.closest('.iface-type');
+      if (!sel) return;
+      const row      = sel.closest('.iface-row');
+      const refSel   = row.querySelector('.iface-ref');
+      const metricIn = row.querySelector('.iface-metric');
+      const isLambda = sel.value === "lambda";
+      const opts = isLambda ? lambdaOptsGlobal : ispOptsGlobal;
+      refSel.innerHTML = `<option value="">— ${isLambda ? "Lambda" : "Proveedor"} —</option>${opts}`;
+      metricIn.disabled = !isLambda;
+      metricIn.style.opacity = isLambda ? "1" : "0.4";
+    });
+
+    // Agregar fila nueva
+    document.getElementById('btn-add-iface')?.addEventListener('click', () => {
+      document.getElementById('ifaces-empty')?.remove();
+      const cont = document.getElementById('f-rtr-ifaces');
+      const wrap = document.createElement('div');
+      wrap.innerHTML = ifaceRowHTML(null);
+      cont.appendChild(wrap.firstElementChild);
+    });
+  }, 50);
+}
+
+window._editRouter = id => {
+  const r = allRouters.find(r => r.id === id);
+  if (r) openRouterModal(r);
+};
+
+window._deleteRouter = async id => {
+  const r = allRouters.find(r => r.id === id);
+  if (!confirm(`¿Eliminar ruteador "${r?.name}"? Se eliminarán también sus interfaces.`)) return;
+  try {
+    await API.deleteRouter(id);
+    showToast(`Ruteador eliminado ✓`);
+    await loadRouters();
+  } catch(e) {
+    alert(e.error || "Error al eliminar.");
+  }
+};
+
+// ── PROVEEDORES ISP ───────────────────────────────────────────────────────────
+
+async function loadISPProviders() {
+  try { allISPProviders = await API.getISPProviders(); } catch { allISPProviders = []; }
+  renderISPProvidersTable();
+}
+
+function renderISPProvidersTable() {
+  const search = document.getElementById("ispprov-search")?.value.toLowerCase() || "";
+  const filtered = allISPProviders.filter(p => !search || p.name.toLowerCase().includes(search));
+  const tbody = document.getElementById("ispprov-tbody");
+  if (!tbody) return;
+  tbody.innerHTML = filtered.map(p => `
+    <tr>
+      <td><span class="color-swatch">
+        <span class="color-dot" style="background:${p.color};border:2px solid ${p.color};"></span>
+        <code style="font-size:11px">${p.color}</code>
+      </span></td>
+      <td><b>${p.name}</b></td>
+      <td>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-secondary btn-sm btn-icon" onclick="window._editISPProvider(${p.id})" title="Editar">✏️</button>
+          <button class="btn btn-danger btn-sm btn-icon" onclick="window._deleteISPProvider(${p.id})" title="Eliminar">🗑</button>
+        </div>
+      </td>
+    </tr>
+  `).join("") || `<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:40px">Sin resultados</td></tr>`;
+}
+
+// ── ISP Provider Modal ────────────────────────────────────────────────────────
+
+function openISPProviderModal(prov = null) {
+  const isEdit = !!prov;
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">${isEdit ? "✏️ Editar Proveedor ISP" : "➕ Nuevo Proveedor ISP"}</div>
+      <button class="btn btn-icon modal-cancel" style="font-size:18px;">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>Nombre *</label>
+          <input id="f-isp-name" value="${prov?.name || ''}" placeholder="ej: Telmex">
+        </div>
+        <div class="form-group">
+          <label>Color (hex) *</label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="color" id="f-isp-color-picker" value="${prov?.color || '#3B82F6'}"
+              style="width:48px;height:36px;padding:2px;border-radius:6px;cursor:pointer;">
+            <input id="f-isp-color" value="${prov?.color || '#3B82F6'}" style="flex:1;" placeholder="#RRGGBB">
+          </div>
+        </div>
+      </div>
+      <div id="f-isp-error" class="form-error" style="margin-top:12px;display:none;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary modal-cancel">Cancelar</button>
+      <button class="btn btn-primary modal-submit">${isEdit ? "Guardar cambios" : "Crear proveedor"}</button>
+    </div>
+  `, async () => {
+    const name  = document.getElementById("f-isp-name").value.trim();
+    const color = document.getElementById("f-isp-color").value.trim();
+    const errEl = document.getElementById("f-isp-error");
+    if (!name || !color) {
+      errEl.textContent = "Nombre y color son obligatorios.";
+      errEl.style.display = "block";
+      return;
+    }
+    try {
+      if (isEdit) await API.updateISPProvider(prov.id, { name, color });
+      else        await API.createISPProvider({ name, color });
+      closeModal();
+      showToast(isEdit ? "Proveedor actualizado ✓" : "Proveedor creado ✓");
+      await loadISPProviders();
+    } catch(e) {
+      errEl.textContent = e.error || "Error al guardar.";
+      errEl.style.display = "block";
+    }
+  });
+
+  setTimeout(() => {
+    const picker = document.getElementById("f-isp-color-picker");
+    const text   = document.getElementById("f-isp-color");
+    picker?.addEventListener("input", () => { text.value = picker.value; });
+    text?.addEventListener("input", () => {
+      if (/^#[0-9A-Fa-f]{6}$/.test(text.value)) picker.value = text.value;
+    });
+  }, 50);
+}
+
+window._editISPProvider = id => {
+  const p = allISPProviders.find(p => p.id === id);
+  if (p) openISPProviderModal(p);
+};
+
+window._deleteISPProvider = async id => {
+  const p = allISPProviders.find(p => p.id === id);
+  if (!confirm(`¿Eliminar proveedor ISP "${p?.name}"?`)) return;
+  try {
+    await API.deleteISPProvider(id);
+    showToast(`Proveedor "${p?.name}" eliminado ✓`);
+    await loadISPProviders();
   } catch(e) {
     alert(e.error || "Error al eliminar.");
   }

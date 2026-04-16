@@ -154,7 +154,7 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   color: var(--text-primary);
 }
 .nav-item:active { transform: scale(0.97); }
-.nav-icon { flex-shrink: 0; opacity: 0.75; transition: opacity var(--tr); }
+.nav-icon { font-size: 15px; flex-shrink: 0; opacity: 0.75; transition: opacity var(--tr); }
 .nav-item:hover .nav-icon,
 .nav-item.active .nav-icon { opacity: 1; }
 .nav-item--external { opacity: 0.6; }
@@ -743,7 +743,6 @@ body.light #theme-toggle:hover {
   letter-spacing: 0.3px;
   font-weight: 400;
 }
-/* .nav-icon base rules defined earlier; no font-size needed for SVGs */
 
 /* ── Card Title ────────────────────────────────────────────── */
 .card-title {
@@ -1058,8 +1057,6 @@ body.light #theme-toggle:hover {
   padding: 1px 5px;
   border-radius: 4px;
 }
-
-/* Help nav item — SVG icon, no special wrapping needed */
 
 /* ══════════════════════════════════════════════════════════
    ISP Layer page
