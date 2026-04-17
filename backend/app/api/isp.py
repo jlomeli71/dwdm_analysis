@@ -2,7 +2,7 @@
 from collections import Counter
 from flask import Blueprint, request, jsonify
 from ..extensions import db
-from ..models import Router, ISPProvider, RouterInterface, TrafficFlow, LambdaUtilization, Lambda, Site
+from ..models import Router, ISPProvider, RouterInterface, TrafficFlow, ISPPriority, Lambda, Site
 
 bp = Blueprint("isp", __name__)
 
@@ -42,8 +42,8 @@ def create_router():
 
     if not site_id or not name or not brand:
         return jsonify({"error": "site_id, name y brand son obligatorios"}), 422
-    if brand not in ("cisco", "juniper", "cirion"):
-        return jsonify({"error": "brand debe ser 'cisco', 'juniper' o 'cirion'"}), 422
+    if brand not in ("cisco", "juniper", "cirion", "axtel"):
+        return jsonify({"error": "brand debe ser 'cisco', 'juniper', 'cirion' o 'axtel'"}), 422
     if not Site.query.get(site_id):
         return jsonify({"error": f"El sitio '{site_id}' no existe"}), 404
     if Router.query.filter_by(site_id=site_id).first():
@@ -65,8 +65,8 @@ def update_router(router_id):
     if name:
         router.name = name
     if brand:
-        if brand not in ("cisco", "juniper", "cirion"):
-            return jsonify({"error": "brand debe ser 'cisco', 'juniper' o 'cirion'"}), 422
+        if brand not in ("cisco", "juniper", "cirion", "axtel"):
+            return jsonify({"error": "brand debe ser 'cisco', 'juniper', 'cirion' o 'axtel'"}), 422
         router.brand = brand
 
     db.session.commit()
@@ -212,20 +212,20 @@ def update_traffic_flow(flow_id):
     flow = TrafficFlow.query.get_or_404(flow_id)
     data = request.get_json(silent=True) or {}
 
-    if "interfaces_count" in data:
-        count = int(data["interfaces_count"])
-        if count < 0:
-            return jsonify({"error": "interfaces_count no puede ser negativo"}), 400
-        # Validar que no supere la capacidad ISP disponible en el sitio ingress
-        isp_capacity = RouterInterface.query.filter_by(
+    if "traffic_gbps" in data:
+        gbps = int(data["traffic_gbps"])
+        if gbps < 0:
+            return jsonify({"error": "traffic_gbps no puede ser negativo"}), 400
+        # Validar que no supere la capacidad ISP total en el sitio ingress
+        isp_capacity_gbps = RouterInterface.query.filter_by(
             isp_provider_id=flow.isp_provider_id,
-        ).join(Router).filter(Router.site_id == flow.ingress_site_id).count()
-        if count > isp_capacity:
+        ).join(Router).filter(Router.site_id == flow.ingress_site_id).count() * 100
+        if gbps > isp_capacity_gbps:
             return jsonify({
-                "error": f"interfaces_count ({count}) supera la capacidad ISP "
-                         f"disponible en el sitio ({isp_capacity} interfaces)"
+                "error": f"traffic_gbps ({gbps}) supera la capacidad ISP "
+                         f"disponible en el sitio ({isp_capacity_gbps} Gbps)"
             }), 400
-        flow.interfaces_count = count
+        flow.traffic_gbps = gbps
 
     db.session.commit()
     return jsonify(flow.to_dict())
@@ -262,14 +262,37 @@ def simulate_isp_provider():
         ingress_site_id=site_id,
     ).all()
 
-    affected_gbps  = sum(f.interfaces_count * 100 for f in affected_flows)
-    affected_ifaces = sum(f.interfaces_count for f in affected_flows)
+    affected_gbps = sum(f.traffic_gbps for f in affected_flows)
 
     provider_ifaces_total = RouterInterface.query.filter_by(
         router_id=router.id,
         iface_type="isp",
         isp_provider_id=provider.id,
     ).count()
+
+    # ── Prioridades ISP: identificar qué proveedor absorbe el tráfico ─────────
+
+    priority_fallback = []
+    for flow in affected_flows:
+        pgw = flow.pgw
+        # Buscar proveedores de prioridad 2 y 3 para este PGW/egress
+        fallback_priorities = ISPPriority.query.filter_by(
+            egress_site_id=flow.egress_site_id,
+            pgw=pgw,
+        ).filter(ISPPriority.priority_level > 1).order_by(ISPPriority.priority_level).all()
+
+        for fp in fallback_priorities:
+            if fp.isp_provider_id != provider.id:
+                priority_fallback.append({
+                    "pgw":                 pgw,
+                    "egress_site_id":      flow.egress_site_id,
+                    "egress_site_name":    flow.egress_site.name if flow.egress_site else flow.egress_site_id,
+                    "fallback_provider":   fp.isp_provider.name if fp.isp_provider else None,
+                    "fallback_color":      fp.isp_provider.color if fp.isp_provider else None,
+                    "fallback_ingress":    fp.ingress_site_id,
+                    "priority_level":      fp.priority_level,
+                    "traffic_at_risk_gbps": flow.traffic_gbps,
+                })
 
     # ── Capacidad disponible de OTROS proveedores en el mismo sitio ───────────
 
@@ -285,46 +308,40 @@ def simulate_isp_provider():
         op_ifaces_total = RouterInterface.query.filter_by(
             router_id=router.id, iface_type="isp", isp_provider_id=op.id
         ).count()
-        op_used = sum(
-            f.interfaces_count
+        op_used_gbps = sum(
+            f.traffic_gbps
             for f in TrafficFlow.query.filter_by(isp_provider_id=op.id, ingress_site_id=site_id).all()
         )
-        op_avail = max(0, op_ifaces_total - op_used)
+        op_capacity_gbps = op_ifaces_total * 100
+        op_avail_gbps = max(0, op_capacity_gbps - op_used_gbps)
         other_summary.append({
-            "provider": op.name,
-            "color": op.color,
-            "total_ifaces": op_ifaces_total,
-            "used_ifaces": op_used,
-            "available_ifaces": op_avail,
+            "provider":          op.name,
+            "color":             op.color,
+            "capacity_gbps":     op_capacity_gbps,
+            "used_gbps":         op_used_gbps,
+            "available_gbps":    op_avail_gbps,
         })
 
-    available_ifaces = sum(s["available_ifaces"] for s in other_summary)
-    available_gbps   = available_ifaces * 100
-    deficit_gbps     = max(0, affected_gbps - available_gbps)
+    available_gbps = sum(s["available_gbps"] for s in other_summary)
+    deficit_gbps   = max(0, affected_gbps - available_gbps)
 
     # ── Redistribución proporcional (local) ────────────────────────────────────
-    # Protocolo IGP ISIS asumido; todas las interfaces ISP con la misma métrica
-    # (sin peso diferencial entre proveedores ISP externos).
 
     redistribution_detail = []
-    if available_ifaces > 0 and affected_ifaces > 0:
+    if available_gbps > 0 and affected_gbps > 0:
         for s in other_summary:
-            if s["available_ifaces"] > 0:
-                prop          = s["available_ifaces"] / available_ifaces
+            if s["available_gbps"] > 0:
+                prop          = s["available_gbps"] / available_gbps
                 absorbed_gbps = round(affected_gbps * prop, 1)
                 redistribution_detail.append({
                     "provider":       s["provider"],
                     "color":          s["color"],
-                    "interfaces":     s["available_ifaces"],
-                    "capacity_gbps":  s["total_ifaces"] * 100,
+                    "capacity_gbps":  s["capacity_gbps"],
                     "absorbed_gbps":  absorbed_gbps,
-                    "overloaded":     absorbed_gbps > s["total_ifaces"] * 100,
+                    "overloaded":     absorbed_gbps > s["capacity_gbps"],
                 })
 
     # ── Rerouteo ISIS por interfaces lambda (solo si hay déficit) ────────────
-    # Cuando la redistribución local no cubre el tráfico afectado, ISIS puede
-    # reconverger y enrutar hacia sitios vecinos con conectividad ISP disponible.
-    # Se ordenan por métrica ISIS ascendente (menor métrica = ruta preferida).
 
     isis_rerouting = []
     if deficit_gbps > 0 and router.brand in ("cisco", "juniper"):
@@ -343,25 +360,23 @@ def simulate_isp_provider():
             if not remote_router:
                 continue
 
-            # Capacidad ISP total en el sitio remoto
             remote_isp_total = RouterInterface.query.filter_by(
                 router_id=remote_router.id, iface_type="isp"
-            ).count() * 100  # Gbps
+            ).count() * 100
 
-            # Tráfico ya configurado en el sitio remoto
             remote_used = sum(
-                f.interfaces_count * 100
+                f.traffic_gbps
                 for f in TrafficFlow.query.filter_by(ingress_site_id=remote_site_id).all()
             )
             remote_available = max(0, remote_isp_total - remote_used)
 
             isis_rerouting.append({
-                "interface_name":          iface.name,
-                "lambda_name":             iface.lambda_.name,
-                "isis_metric":             iface.isis_metric,
-                "remote_site_id":          remote_site_id,
-                "remote_site_name":        remote_router.site.name if remote_router.site else remote_site_id,
-                "remote_isp_capacity_gbps": remote_isp_total,
+                "interface_name":            iface.name,
+                "lambda_name":               iface.lambda_.name,
+                "isis_metric":               iface.isis_metric,
+                "remote_site_id":            remote_site_id,
+                "remote_site_name":          remote_router.site.name if remote_router.site else remote_site_id,
+                "remote_isp_capacity_gbps":  remote_isp_total,
                 "remote_isp_available_gbps": remote_available,
             })
 
@@ -376,6 +391,7 @@ def simulate_isp_provider():
         "available_gbps":        available_gbps,
         "deficit_gbps":          deficit_gbps,
         "status":                "deficit" if deficit_gbps > 0 else ("redistributed" if affected_gbps > 0 else "no_traffic"),
+        "priority_fallback":     priority_fallback,
         "redistribution_detail": redistribution_detail,
         "isis_rerouting":        isis_rerouting,
         "affected_flows":        [f.to_dict() for f in affected_flows],
@@ -396,7 +412,7 @@ def simulate_lambda_traffic():
 
     affected = []
     for flow in all_flows:
-        if not flow.lambda_names or flow.interfaces_count == 0:
+        if not flow.lambda_names or flow.traffic_gbps == 0:
             continue
         flow_lambdas = {n.strip() for n in flow.lambda_names.split(",")}
         impacted = flow_lambdas & failed_set
@@ -404,7 +420,7 @@ def simulate_lambda_traffic():
             affected.append({
                 **flow.to_dict(),
                 "failed_lambdas": list(impacted),
-                "traffic_at_risk_gbps": flow.interfaces_count * 100,
+                "traffic_at_risk_gbps": flow.traffic_gbps,
             })
 
     total_at_risk = sum(a["traffic_at_risk_gbps"] for a in affected)
@@ -417,212 +433,242 @@ def simulate_lambda_traffic():
     })
 
 
-# ── Utilización mensual de lambdas (importación Excel) ───────────────────────
+# ── Prioridades ISP ───────────────────────────────────────────────────────────
 
-# Mapeo de nombres de sitio del Excel a Site IDs en la BD
-_EXCEL_SITE_MAP = {
-    "mso tlalnepantla": "MSOMEX01",
-    "tlalnepantla":     "MSOMEX01",
-    "mso megacentro":   "MSOMEX01",
-    "megacentro":       "MSOMEX01",
-    "mso apodaca":      "MSOMTY01",
-    "apodaca":          "MSOMTY01",
-    "mso monterrey":    "MSOMTY01",    # Apodaca es en Monterrey
-    "mso tlaquepaque":  "MSOGDL01",
-    "tlaquepaque":      "MSOGDL01",
-    "mso guadalajara":  "MSOGDL01",
-    "guadalajara":      "MSOGDL01",
-    "mtx toluca":       "MSOTOL01",
-    "toluca":           "MSOTOL01",
-    "nuevo laredo":     "NFO-038",
-    "laredo":           "NFO-038",
-    "reynosa":          "TAMREY1273",
-    "cd. juarez":       "MSOJRZ01",
-    "cd juarez":        "MSOJRZ01",
-    "juarez":           "MSOJRZ01",
-    "kio queretaro":    "KIO-QRO",
-    "kio qro":          "KIO-QRO",
-    "kio tultitlan":    None,   # sitio desconocido
-}
+@bp.get("/isp-priorities")
+def get_isp_priorities():
+    """Lista todas las prioridades ISP, agrupadas por (egress_site, pgw)."""
+    priorities = ISPPriority.query.order_by(
+        ISPPriority.egress_site_id,
+        ISPPriority.pgw,
+        ISPPriority.priority_level,
+    ).all()
+    return jsonify([p.to_dict() for p in priorities])
 
 
-def _resolve_site(name_fragment: str):
-    """Mapea un fragmento de nombre de sitio del Excel al Site ID correspondiente."""
-    key = name_fragment.strip().lower()
-    for k, v in _EXCEL_SITE_MAP.items():
-        if k in key:
-            return v
-    return None  # desconocido
+@bp.put("/isp-priorities/<int:priority_id>")
+def update_isp_priority(priority_id):
+    """Actualiza el priority_level de un registro ISPPriority."""
+    priority = ISPPriority.query.get_or_404(priority_id)
+    data  = request.get_json(silent=True) or {}
+    level = data.get("priority_level")
+
+    if level is None or not isinstance(level, int) or level < 1:
+        return jsonify({"error": "priority_level debe ser un entero ≥ 1"}), 422
+
+    priority.priority_level = level
+    db.session.commit()
+    return jsonify(priority.to_dict())
 
 
-def _find_lambda_for_link(site_a_id, site_b_id):
-    """Intenta encontrar una lambda cuyos endpoints sean site_a y site_b."""
-    if not site_a_id or not site_b_id:
-        return None
-    all_lambdas = Lambda.query.all()
-    for lm in all_lambdas:
-        freq = Counter()
-        for ls in lm.lambda_segments:
-            seg = ls.segment
-            freq[seg.site_a_id] += 1
-            freq[seg.site_b_id] += 1
-        endpoints = [s for s, c in freq.items() if c == 1]
-        if not endpoints and lm.lambda_segments:
-            seg = lm.lambda_segments[0].segment
-            endpoints = [seg.site_a_id, seg.site_b_id]
-        ep_set = set(endpoints)
-        if site_a_id in ep_set and site_b_id in ep_set:
-            return lm
-    return None
-
-
-@bp.post("/upload/lambda-utilization")
-def upload_lambda_utilization():
+@bp.post("/isp-priorities/reorder")
+def reorder_isp_priorities():
     """
-    Importa datos de utilización mensual desde un archivo Excel.
-    Multipart: campo 'file' = archivo .xlsx
-    Formato esperado: hoja THP_Marzo26
-      Fila 0: fechas de mes (col 4, 8, 12, 16, 20, 24)
-      Fila 1: cabeceras (Enlace, Equipo A, Equipo B, BW Gb, Max Gbps, % Util Max, AVG Gbps, % Util AVG, ...)
-      Filas 2+: datos
+    Intercambia los priority_level de dos registros ISPPriority.
+    Body: { "id_a": <int>, "id_b": <int> }
     """
-    try:
-        import openpyxl
-    except ImportError:
-        return jsonify({"error": "openpyxl no está instalado"}), 500
+    data = request.get_json(silent=True) or {}
+    id_a = data.get("id_a")
+    id_b = data.get("id_b")
 
-    if "file" not in request.files:
-        return jsonify({"error": "Se requiere el campo 'file'"}), 400
+    if not id_a or not id_b:
+        return jsonify({"error": "Se requieren 'id_a' e 'id_b'"}), 422
 
-    file = request.files["file"]
-    if not file.filename.endswith((".xlsx", ".xls")):
-        return jsonify({"error": "El archivo debe ser .xlsx o .xls"}), 400
+    pa = ISPPriority.query.get_or_404(id_a)
+    pb = ISPPriority.query.get_or_404(id_b)
 
-    try:
-        wb = openpyxl.load_workbook(file, data_only=True)
-    except Exception as e:
-        return jsonify({"error": f"No se pudo abrir el archivo: {e}"}), 400
+    pa.priority_level, pb.priority_level = pb.priority_level, pa.priority_level
+    db.session.commit()
+    return jsonify({"a": pa.to_dict(), "b": pb.to_dict()})
 
-    # Buscar la hoja correcta (THP_Marzo26 o la activa)
-    ws = wb["THP_Marzo26"] if "THP_Marzo26" in wb.sheetnames else wb.active
-    rows = list(ws.iter_rows(values_only=True))
 
-    if len(rows) < 3:
-        return jsonify({"error": "El archivo no tiene el formato esperado"}), 400
+# ── Simulación: falla de ruteador ─────────────────────────────────────────────
 
-    # Extraer fechas de mes (fila 0, columnas 4,8,12,16,20,24)
-    month_row = rows[0]
-    month_cols = [4, 8, 12, 16, 20, 24]
-    months = []
-    for col_idx in month_cols:
-        val = month_row[col_idx] if col_idx < len(month_row) else None
-        if hasattr(val, "strftime"):
-            months.append(val.strftime("%Y-%m"))
-        elif isinstance(val, str) and len(val) >= 7:
-            months.append(val[:7])
-        else:
-            months.append(None)
+@bp.post("/simulation/router")
+def simulate_router_failure():
+    """
+    Simula la caída de un ruteador.
+    Calcula: flujos afectados (ingress en ese sitio), lambdas que pasan por el sitio,
+    capacidad en riesgo, y análisis de prioridades BGP (fallback ISP).
+    """
+    data      = request.get_json(silent=True) or {}
+    router_id = data.get("router_id")
 
-    imported, skipped, flagged = 0, 0, []
-    errors = []
+    if not router_id:
+        return jsonify({"error": "Se requiere 'router_id'"}), 400
 
-    for row in rows[2:]:
-        if not row or row[0] is None:
-            break
+    router = Router.query.get_or_404(router_id)
+    site_id = router.site_id
 
-        link_name = str(row[0]).strip()
-        bw_gbps   = int(row[3]) if row[3] else 100
+    # Flujos con ingress en este sitio
+    affected_flows = TrafficFlow.query.filter_by(ingress_site_id=site_id).all()
+    affected_gbps  = sum(f.traffic_gbps for f in affected_flows)
 
-        # Parsear los 6 meses (cada mes ocupa 4 columnas: Max, %Max, AVG, %AVG)
-        for i, month in enumerate(months):
-            if not month:
-                continue
-            base = 4 + i * 4
-            if base + 3 >= len(row):
-                continue
-            max_gbps = row[base]
-            pct_max  = row[base + 1]
-            avg_gbps = row[base + 2]
-            pct_avg  = row[base + 3]
+    # Lambdas que terminan o pasan por este sitio
+    lambda_ifaces = [i for i in router.interfaces if i.iface_type == "lambda" and i.lambda_]
+    affected_lambdas = list({i.lambda_.name for i in lambda_ifaces})
 
-            # Detectar flags
-            row_flags = []
-            if bw_gbps >= 200:
-                row_flags.append("DOUBLE_LAMBDA")
+    # Prioridades de fallback para los PGWs afectados
+    pgw_egress_pairs = {(f.egress_site_id, f.pgw) for f in affected_flows if f.pgw}
+    priority_fallback = []
+    for egress_site_id, pgw in sorted(pgw_egress_pairs):
+        fallbacks = ISPPriority.query.filter_by(
+            egress_site_id=egress_site_id, pgw=pgw,
+        ).order_by(ISPPriority.priority_level).all()
+        priority_fallback.append({
+            "egress_site_id":   egress_site_id,
+            "pgw":              pgw,
+            "priorities":       [fp.to_dict() for fp in fallbacks],
+        })
 
-            # Resolver sitios del link_name
-            parts = [p.strip() for p in link_name.replace(" - ", "-").split("-", 1)]
-            site_a = _resolve_site(parts[0]) if len(parts) > 0 else None
-            site_b = _resolve_site(parts[1]) if len(parts) > 1 else None
+    # Rerouteo ISIS: hacia qué sitios puede reconverger el tráfico
+    isis_options = []
+    for iface in sorted(
+        [i for i in router.interfaces if i.iface_type == "lambda" and i.isis_metric],
+        key=lambda x: x.isis_metric
+    ):
+        remote = _lambda_remote_site(iface.lambda_, site_id)
+        if not remote:
+            continue
+        remote_rtr = Router.query.filter_by(site_id=remote).first()
+        remote_isp = RouterInterface.query.filter_by(
+            router_id=remote_rtr.id, iface_type="isp"
+        ).count() * 100 if remote_rtr else 0
+        isis_options.append({
+            "lambda_name":              iface.lambda_.name,
+            "isis_metric":              iface.isis_metric,
+            "remote_site_id":           remote,
+            "remote_site_name":         remote_rtr.site.name if remote_rtr and remote_rtr.site else remote,
+            "remote_isp_capacity_gbps": remote_isp,
+        })
 
-            if site_a is None or site_b is None:
-                row_flags.append("UNKNOWN_SITE")
-
-            # Buscar lambda correspondiente
-            lm = _find_lambda_for_link(site_a, site_b) if site_a and site_b else None
-
-            flags_str = ",".join(row_flags) if row_flags else None
-
-            # Upsert: si ya existe este (month, link_name), actualizar
-            existing = LambdaUtilization.query.filter_by(month=month, link_name=link_name).first()
-            if existing:
-                existing.bw_gbps  = bw_gbps
-                existing.max_gbps = max_gbps
-                existing.pct_max  = pct_max
-                existing.avg_gbps = avg_gbps
-                existing.pct_avg  = pct_avg
-                existing.flags    = flags_str
-                existing.lambda_id = lm.id if lm else None
-            else:
-                rec = LambdaUtilization(
-                    month=month, link_name=link_name, bw_gbps=bw_gbps,
-                    max_gbps=max_gbps, pct_max=pct_max,
-                    avg_gbps=avg_gbps, pct_avg=pct_avg,
-                    flags=flags_str, lambda_id=lm.id if lm else None,
-                )
-                db.session.add(rec)
-                imported += 1
-
-            if row_flags:
-                flagged.append({
-                    "month": month, "link_name": link_name,
-                    "bw_gbps": bw_gbps, "flags": row_flags,
-                    "site_a": site_a, "site_b": site_b,
-                })
-
-    try:
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": f"Error al guardar: {e}"}), 500
-
-    months_loaded = [m for m in months if m]
     return jsonify({
-        "status": "ok",
-        "months_loaded": months_loaded,
-        "records_imported": imported,
-        "flagged_rows": flagged,
+        "router_id":            router_id,
+        "router_name":          router.name,
+        "site_id":              site_id,
+        "site_name":            router.site.name if router.site else site_id,
+        "affected_flows_count": len(affected_flows),
+        "affected_gbps":        affected_gbps,
+        "affected_lambdas":     affected_lambdas,
+        "priority_fallback":    priority_fallback,
+        "isis_options":         isis_options,
+        "affected_flows":       [f.to_dict() for f in affected_flows],
     })
 
 
-@bp.get("/lambda-utilization")
-def get_lambda_utilization():
-    """Retorna todos los registros de utilización agrupados por mes."""
-    month_filter = request.args.get("month")
-    q = LambdaUtilization.query
-    if month_filter:
-        q = q.filter_by(month=month_filter)
-    records = q.order_by(LambdaUtilization.month, LambdaUtilization.link_name).all()
+# ── Reporte de simulación completo ────────────────────────────────────────────
 
-    # Agrupar por mes
-    by_month = {}
-    for r in records:
-        by_month.setdefault(r.month, []).append(r.to_dict())
+@bp.get("/simulation/report")
+def get_simulation_report():
+    """
+    Genera un reporte de análisis completo:
+    1. Adecuación de prioridades: verifica si prioridad 2+3 cubren el tráfico de prioridad 1.
+    2. Criticidad de lambdas: lambdas ordenadas por tráfico ISP afectado si fallan.
+    3. Criticidad de proveedores ISP: proveedores ordenados por tráfico afectado si fallan.
+    """
+    all_flows      = TrafficFlow.query.all()
+    all_priorities = ISPPriority.query.all()
 
-    # Lista de meses disponibles
-    months = sorted(by_month.keys())
+    # ── 1. Adecuación de prioridades ─────────────────────────────────────────
+    # Para cada (egress_site, pgw), verificar si el proveedor primario falla
+    # y los secundarios/terciarios tienen capacidad suficiente.
+
+    priority_adequacy = []
+    # Agrupar prioridades por (egress_site, pgw)
+    pgw_groups: dict[tuple, list] = {}
+    for p in all_priorities:
+        key = (p.egress_site_id, p.pgw)
+        pgw_groups.setdefault(key, []).append(p)
+
+    for (egress, pgw), priorities in sorted(pgw_groups.items()):
+        priorities.sort(key=lambda x: x.priority_level)
+        primary = next((p for p in priorities if p.priority_level == 1), None)
+        if not primary:
+            continue
+
+        # Tráfico primario
+        primary_flows = [
+            f for f in all_flows
+            if f.isp_provider_id == primary.isp_provider_id
+            and f.ingress_site_id == primary.ingress_site_id
+            and f.egress_site_id == egress
+            and f.pgw == pgw
+        ]
+        primary_gbps = sum(f.traffic_gbps for f in primary_flows)
+
+        # Capacidad de fallback (prioridades 2 y 3)
+        fallback_capacity = 0
+        fallback_details  = []
+        for fp in priorities:
+            if fp.priority_level == 1:
+                continue
+            fb_ifaces = RouterInterface.query.filter_by(
+                isp_provider_id=fp.isp_provider_id,
+            ).join(Router).filter(Router.site_id == fp.ingress_site_id).count()
+            fb_used = sum(
+                f.traffic_gbps
+                for f in all_flows
+                if f.isp_provider_id == fp.isp_provider_id
+                and f.ingress_site_id == fp.ingress_site_id
+                and f.egress_site_id == egress
+                and f.pgw == pgw
+            )
+            fb_avail = max(0, fb_ifaces * 100 - fb_used)
+            fallback_capacity += fb_avail
+            fallback_details.append({
+                "priority_level":    fp.priority_level,
+                "provider":          fp.isp_provider.name if fp.isp_provider else None,
+                "ingress_site_id":   fp.ingress_site_id,
+                "available_gbps":    fb_avail,
+            })
+
+        adequate = fallback_capacity >= primary_gbps
+        priority_adequacy.append({
+            "egress_site_id":     egress,
+            "egress_site_name":   primary.egress_site.name if primary.egress_site else egress,
+            "pgw":                pgw,
+            "primary_provider":   primary.isp_provider.name if primary.isp_provider else None,
+            "primary_gbps":       primary_gbps,
+            "fallback_capacity_gbps": fallback_capacity,
+            "adequate":           adequate,
+            "fallback_details":   fallback_details,
+        })
+
+    # ── 2. Criticidad de lambdas (por tráfico afectado) ───────────────────────
+
+    lambda_criticality: dict[str, int] = {}
+    for flow in all_flows:
+        if not flow.lambda_names or flow.traffic_gbps == 0:
+            continue
+        for lname in flow.lambda_names.split(","):
+            lname = lname.strip()
+            lambda_criticality[lname] = lambda_criticality.get(lname, 0) + flow.traffic_gbps
+
+    lambda_ranking = sorted(
+        [{"lambda_name": k, "traffic_at_risk_gbps": v} for k, v in lambda_criticality.items()],
+        key=lambda x: x["traffic_at_risk_gbps"], reverse=True
+    )
+
+    # ── 3. Criticidad de proveedores ISP ──────────────────────────────────────
+
+    provider_criticality: dict[str, dict] = {}
+    for flow in all_flows:
+        if flow.traffic_gbps == 0:
+            continue
+        pname = flow.isp_provider.name if flow.isp_provider else "Unknown"
+        pcolor = flow.isp_provider.color if flow.isp_provider else "#888"
+        if pname not in provider_criticality:
+            provider_criticality[pname] = {"traffic_gbps": 0, "color": pcolor, "flows": 0}
+        provider_criticality[pname]["traffic_gbps"] += flow.traffic_gbps
+        provider_criticality[pname]["flows"] += 1
+
+    provider_ranking = sorted(
+        [{"provider": k, **v} for k, v in provider_criticality.items()],
+        key=lambda x: x["traffic_gbps"], reverse=True
+    )
 
     return jsonify({
-        "months": months,
-        "data": by_month,
+        "priority_adequacy":  priority_adequacy,
+        "lambda_ranking":     lambda_ranking,
+        "provider_ranking":   provider_ranking,
     })

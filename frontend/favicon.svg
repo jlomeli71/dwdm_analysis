@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Fondo redondeado en el color base de la app -->
+  <rect width="32" height="32" rx="6" fill="#0d1220"/>
+  <!-- Logo: 3 capas DWDM, centrado (24×24 viewport desplazado 4px) en accent-blue -->
+  <g transform="translate(4,4)" fill="none" stroke="#3b7dd8" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+    <path d="M2 12l10 5 10-5"/>
+    <path d="M2 17l10 5 10-5"/>
+  </g>
+</svg>

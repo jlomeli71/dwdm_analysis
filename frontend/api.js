@@ -72,14 +72,13 @@ export const API = {
   // ISP Layer — Simulación
   simulateISPProvider:     body       => request("POST", "/simulation/isp-provider", body),
   simulateLambdaTraffic:   body       => request("POST", "/simulation/lambda-traffic", body),
+  simulateRouter:          body       => request("POST", "/simulation/router", body),
 
-  // Utilización mensual (Excel import)
-  uploadLambdaUtilization: (file) => {
-    const fd = new FormData();
-    fd.append("file", file);
-    return fetch(BASE + "/upload/lambda-utilization", { method: "POST", body: fd })
-      .then(r => r.json().catch(() => ({})))
-      .then(data => { if (!data.status) throw data; return data; });
-  },
-  getLambdaUtilization: (month = "") => request("GET", `/lambda-utilization${month ? "?month=" + month : ""}`),
+  // ISP Layer — Prioridades ISP
+  getISPPriorities:        ()         => request("GET",  "/isp-priorities"),
+  updateISPPriority:       (id, body) => request("PUT",  `/isp-priorities/${id}`, body),
+  reorderISPPriorities:    body       => request("POST", "/isp-priorities/reorder", body),
+
+  // Reporte de simulación completo
+  getSimulationReport:     ()         => request("GET",  "/simulation/report"),
 };

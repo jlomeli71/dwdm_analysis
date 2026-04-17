@@ -230,21 +230,23 @@ class RouterInterface(db.Model):
 
 class TrafficFlow(db.Model):
     """Flujo de tráfico de bajada entre un proveedor ISP (ingress) y un sitio MSO (egress).
-    La unidad es número de interfaces de 100 Gbps asignadas a este flujo.
+    traffic_gbps almacena Gbps reales (puede ser no múltiplo de 100).
+    pgw identifica el gateway que consume el tráfico (PGW1 / PGW2), opcional.
     """
     __tablename__ = "traffic_flows"
 
-    id               = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    isp_provider_id  = db.Column(db.Integer, db.ForeignKey("isp_providers.id"), nullable=False)
-    ingress_site_id  = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
-    egress_site_id   = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
-    interfaces_count = db.Column(db.Integer, default=0)   # N × 100 Gbps
+    id              = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    isp_provider_id = db.Column(db.Integer, db.ForeignKey("isp_providers.id"), nullable=False)
+    ingress_site_id = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
+    egress_site_id  = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
+    pgw             = db.Column(db.String(10), nullable=True)   # "PGW1" | "PGW2" | None
+    traffic_gbps    = db.Column(db.Integer, default=0)          # Gbps reales
     # Lambdas que transportan este flujo (CSV de nombres, para flujos multi-hop)
-    lambda_names     = db.Column(db.String(500), nullable=True)
+    lambda_names    = db.Column(db.String(500), nullable=True)
 
-    isp_provider  = db.relationship("ISPProvider", back_populates="traffic_flows")
-    ingress_site  = db.relationship("Site", foreign_keys=[ingress_site_id])
-    egress_site   = db.relationship("Site", foreign_keys=[egress_site_id])
+    isp_provider = db.relationship("ISPProvider", back_populates="traffic_flows")
+    ingress_site = db.relationship("Site", foreign_keys=[ingress_site_id])
+    egress_site  = db.relationship("Site", foreign_keys=[egress_site_id])
 
     def to_dict(self):
         return {
@@ -256,42 +258,45 @@ class TrafficFlow(db.Model):
             "ingress_site_name": self.ingress_site.name if self.ingress_site else None,
             "egress_site_id": self.egress_site_id,
             "egress_site_name": self.egress_site.name if self.egress_site else None,
-            "interfaces_count": self.interfaces_count,
-            "capacity_gbps": self.interfaces_count * 100,
+            "pgw": self.pgw,
+            "traffic_gbps": self.traffic_gbps,
             "lambda_names": self.lambda_names,
         }
 
 
-class LambdaUtilization(db.Model):
-    """Utilización mensual de lambdas importada desde Excel."""
-    __tablename__ = "lambda_utilization"
+class ISPPriority(db.Model):
+    """Prioridad de un proveedor ISP para un PGW en un sitio MSO.
+    Modela la redundancia BGP: priority_level 1=primario, 2=secundario, 3=terciario.
+    """
+    __tablename__ = "isp_priorities"
     __table_args__ = (
-        db.UniqueConstraint("month", "link_name", name="uq_util_month_link"),
+        db.UniqueConstraint(
+            "egress_site_id", "pgw", "isp_provider_id", "ingress_site_id",
+            name="uq_isp_priority"
+        ),
     )
 
-    id        = db.Column(db.Integer, primary_key=True)
-    month     = db.Column(db.String(7),   nullable=False)   # "2025-10"
-    link_name = db.Column(db.String(200), nullable=False)   # del Excel, ej. "Nuevo Laredo-MSO Apodaca"
-    bw_gbps   = db.Column(db.Integer,     nullable=False, default=100)
-    max_gbps  = db.Column(db.Float,       nullable=True)
-    pct_max   = db.Column(db.Float,       nullable=True)    # fracción 0-1
-    avg_gbps  = db.Column(db.Float,       nullable=True)
-    pct_avg   = db.Column(db.Float,       nullable=True)    # fracción 0-1
-    flags     = db.Column(db.String(200), nullable=True)    # CSV: "DOUBLE_LAMBDA", "UNKNOWN_SITE"
-    lambda_id = db.Column(db.Integer, db.ForeignKey("lambdas.id"), nullable=True)
-    lambda_   = db.relationship("Lambda", foreign_keys=[lambda_id])
+    id              = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    egress_site_id  = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
+    pgw             = db.Column(db.String(10), nullable=False)   # "PGW1" | "PGW2"
+    isp_provider_id = db.Column(db.Integer, db.ForeignKey("isp_providers.id"), nullable=False)
+    ingress_site_id = db.Column(db.String(50), db.ForeignKey("sites.id"), nullable=False)
+    priority_level  = db.Column(db.Integer, nullable=False)       # 1=primario, 2=secundario, 3=terciario
+
+    egress_site  = db.relationship("Site", foreign_keys=[egress_site_id])
+    ingress_site = db.relationship("Site", foreign_keys=[ingress_site_id])
+    isp_provider = db.relationship("ISPProvider")
 
     def to_dict(self):
         return {
-            "id":        self.id,
-            "month":     self.month,
-            "link_name": self.link_name,
-            "bw_gbps":   self.bw_gbps,
-            "max_gbps":  round(self.max_gbps, 2)  if self.max_gbps  is not None else None,
-            "pct_max":   round(self.pct_max * 100, 1) if self.pct_max is not None else None,
-            "avg_gbps":  round(self.avg_gbps, 2) if self.avg_gbps is not None else None,
-            "pct_avg":   round(self.pct_avg * 100, 1) if self.pct_avg is not None else None,
-            "flags":     self.flags or "",
-            "lambda_id": self.lambda_id,
-            "lambda_name": self.lambda_.name if self.lambda_ else None,
+            "id": self.id,
+            "egress_site_id":    self.egress_site_id,
+            "egress_site_name":  self.egress_site.name  if self.egress_site  else None,
+            "pgw":               self.pgw,
+            "isp_provider_id":   self.isp_provider_id,
+            "isp_provider_name": self.isp_provider.name  if self.isp_provider else None,
+            "isp_provider_color":self.isp_provider.color if self.isp_provider else None,
+            "ingress_site_id":   self.ingress_site_id,
+            "ingress_site_name": self.ingress_site.name  if self.ingress_site  else None,
+            "priority_level":    self.priority_level,
         }

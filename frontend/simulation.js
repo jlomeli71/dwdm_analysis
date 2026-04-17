@@ -40,6 +40,7 @@ export async function renderSimulation(container) {
             <button class="active" data-mode="segments">Por segmento(s)</button>
             <button data-mode="provider">Por proveedor</button>
             <button data-mode="isp">Falla ISP</button>
+            <button data-mode="router">Falla Ruteador</button>
           </div>
         </div>
 
@@ -87,6 +88,17 @@ export async function renderSimulation(container) {
           <div id="isp-sim-info" style="font-size:12px;color:var(--text-muted);margin-top:8px;"></div>
         </div>
 
+        <!-- Panel: falla de ruteador -->
+        <div id="sim-router-panel" style="display:none;">
+          <div class="form-group">
+            <label>Ruteador a fallar</label>
+            <select id="sim-router-select">
+              <option value="">— Seleccionar ruteador —</option>
+            </select>
+          </div>
+          <div id="router-sim-info" style="font-size:12px;color:var(--text-muted);margin-top:8px;"></div>
+        </div>
+
         <button class="btn btn-primary" id="btn-simulate" style="width:100%;margin-top:8px;" disabled>
           ⚡ Simular Falla
         </button>
@@ -118,6 +130,26 @@ export async function renderSimulation(container) {
     API.getTrafficFlows(),
     API.getRouters(),
   ]);
+
+  // Poblar select de ruteadores
+  const rtrSel = document.getElementById('sim-router-select');
+  ispRouters.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.id;
+    opt.textContent = `${r.name} (${r.site_name || r.site_id})`;
+    rtrSel.appendChild(opt);
+  });
+  rtrSel.addEventListener('change', () => {
+    const rtr = ispRouters.find(r => r.id === +rtrSel.value);
+    if (rtr) {
+      const ispIfaces = rtr.interfaces?.filter(i => i.iface_type === 'isp') || [];
+      document.getElementById('router-sim-info').textContent =
+        `${ispIfaces.length} interfaz(ces) ISP · ${rtr.interfaces?.filter(i => i.iface_type === 'lambda').length || 0} lambda(s)`;
+    } else {
+      document.getElementById('router-sim-info').textContent = '';
+    }
+    updateSimBtn();
+  });
 
   // Poblar select de proveedores de fibra
   const provSel = document.getElementById('sim-provider-select');
@@ -181,7 +213,7 @@ export async function renderSimulation(container) {
     if (prov && site) {
       const affected = ispFlows
         .filter(f => f.isp_provider_name === prov && f.ingress_site_id === site);
-      const gbps = affected.reduce((s, f) => s + f.interfaces_count * 100, 0);
+      const gbps = affected.reduce((s, f) => s + (f.traffic_gbps || 0), 0);
       document.getElementById('isp-sim-info').textContent =
         `${affected.length} flujo(s) afectado(s) · ${gbps} Gbps`;
     }
@@ -219,6 +251,7 @@ export async function renderSimulation(container) {
     document.getElementById('sim-segments-panel').style.display = mode === 'segments' ? 'block' : 'none';
     document.getElementById('sim-provider-panel').style.display = mode === 'provider' ? 'block' : 'none';
     document.getElementById('sim-isp-panel').style.display    = mode === 'isp'      ? 'block' : 'none';
+    document.getElementById('sim-router-panel').style.display = mode === 'router'   ? 'block' : 'none';
     document.getElementById('btn-analyze-all').style.display  = mode === 'isp'      ? 'block' : 'none';
     updateSimBtn();
   });
@@ -336,6 +369,8 @@ function updateSimBtn() {
     const prov = document.getElementById('sim-isp-provider-select')?.value;
     const site = document.getElementById('sim-isp-site-select')?.value;
     btn.disabled = !(prov && site);
+  } else if (mode === 'router') {
+    btn.disabled = !document.getElementById('sim-router-select')?.value;
   }
 }
 
@@ -361,6 +396,10 @@ async function runSimulation() {
       const site = document.getElementById('sim-isp-site-select').value;
       lastResult = await API.simulateISPProvider({ provider: prov, site_id: site });
       renderISPResults(lastResult);
+    } else if (mode === 'router') {
+      const routerId = +document.getElementById('sim-router-select').value;
+      lastResult = await API.simulateRouter({ router_id: routerId });
+      renderRouterResults(lastResult);
     }
   } catch (err) {
     errEl.textContent = err.error || 'Error al ejecutar la simulación.';
@@ -429,8 +468,8 @@ function renderISPResults(result) {
                 <td>${f.isp_provider_name || f.isp_provider}</td>
                 <td style="font-family:var(--font-mono);font-size:11px">${f.ingress_site_id}</td>
                 <td style="font-family:var(--font-mono);font-size:11px">${f.egress_site_id}</td>
-                <td>${f.interfaces_count}</td>
-                <td style="color:var(--accent-red)">${f.interfaces_count * 100} Gbps</td>
+                <td>—</td>
+                <td style="color:var(--accent-red)">${f.traffic_gbps || 0} Gbps</td>
               </tr>
             `).join('')}
           </tbody>
@@ -756,6 +795,162 @@ function renderResults(result, mode) {
         <div>Sin lambdas afectadas</div>
         <div style="font-size:12px;color:var(--text-muted)">Los segmentos seleccionados no pertenecen a ninguna lambda activa</div>
       </div>
+    ` : ''}
+  `;
+}
+
+function renderRouterResults(result) {
+  const el = document.getElementById('sim-results');
+  if (!el) return;
+
+  // El backend retorna: affected_gbps, affected_lambdas (strings), isis_options, affected_flows, priority_fallback
+  const affectedGbps   = result.affected_gbps || 0;
+  const lambdaNames    = result.affected_lambdas || [];
+  const isisOptions    = result.isis_options || [];
+  const flows          = result.affected_flows || [];
+
+  el.innerHTML = `
+    <!-- KPIs ruteador -->
+    <div class="kpi-grid" style="margin-bottom:20px">
+      <div class="kpi-card ${affectedGbps > 0 ? 'kpi-alert' : ''}">
+        <div class="kpi-icon" style="background:rgba(255,107,107,0.15)">📉</div>
+        <div class="kpi-body">
+          <div class="kpi-value">${affectedGbps} Gbps</div>
+          <div class="kpi-label">Tráfico ISP afectado</div>
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon" style="background:rgba(255,212,0,0.15)">λ</div>
+        <div class="kpi-body">
+          <div class="kpi-value">${lambdaNames.length}</div>
+          <div class="kpi-label">Lambdas afectadas</div>
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon" style="background:rgba(255,107,107,0.15)">📋</div>
+        <div class="kpi-body">
+          <div class="kpi-value">${flows.length}</div>
+          <div class="kpi-label">Flujos ISP afectados</div>
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon" style="background:rgba(139,92,246,0.15)">📡</div>
+        <div class="kpi-body">
+          <div class="kpi-value">${isisOptions.length}</div>
+          <div class="kpi-label">Rutas ISIS alternativas</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Info del ruteador -->
+    <div class="card" style="margin-bottom:16px;border-color:rgba(255,107,107,0.3)">
+      <div class="card-title" style="color:var(--accent-red)">
+        🖧 Ruteador caído: ${result.router_name || '—'}
+        <span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:8px">
+          Sitio: ${result.site_name || result.site_id || '—'}
+        </span>
+      </div>
+    </div>
+
+    <!-- Flujos ISP afectados -->
+    ${flows.length > 0 ? `
+    <div class="card" style="margin-bottom:16px;border-color:rgba(255,107,107,0.3)">
+      <div class="card-title" style="color:var(--accent-red)">🔴 Flujos ISP afectados (${flows.length})</div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr>
+            <th>Proveedor ISP</th><th>PGW</th><th>Sitio egreso</th><th>Tráfico</th>
+          </tr></thead>
+          <tbody>
+            ${flows.map(f => `
+              <tr>
+                <td>${f.isp_provider_name || '—'}</td>
+                <td style="font-family:var(--font-mono);font-size:11px">${f.pgw || '—'}</td>
+                <td style="font-family:var(--font-mono);font-size:11px">${f.egress_site_id}</td>
+                <td style="color:var(--accent-red)">${f.traffic_gbps || 0} Gbps</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Lambdas DWDM afectadas -->
+    ${lambdaNames.length > 0 ? `
+    <div class="card" style="margin-bottom:16px;border-color:rgba(255,212,0,0.3)">
+      <div class="card-title" style="color:var(--accent-yellow)">⚡ Lambdas DWDM que pasan por este sitio (${lambdaNames.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0">
+        ${lambdaNames.map(n => `
+          <span class="badge" style="background:rgba(255,212,0,0.12);color:var(--accent-yellow);font-size:11px">${n}</span>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Fallback de prioridades BGP -->
+    ${(result.priority_fallback || []).length > 0 ? `
+    <div class="card" style="margin-bottom:16px;border-color:rgba(0,212,255,0.2)">
+      <div class="card-title" style="color:var(--accent-cyan)">🔄 Prioridades BGP de fallback por PGW</div>
+      ${result.priority_fallback.map(pf => `
+        <div style="margin-bottom:12px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">
+            ${pf.egress_site_id} — ${pf.pgw}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${pf.priorities.map(p => {
+              const colors = {1:'#10B981', 2:'#EAB308', 3:'#F97316'};
+              const c = colors[p.priority_level] || '#6B7280';
+              return `<span class="badge" style="background:${c}22;color:${c};font-size:11px;border:1px solid ${c}44">
+                ${p.priority_level}. ${p.isp_provider_name} (${p.ingress_site_id})
+              </span>`;
+            }).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+
+    <!-- Rerouteo ISIS -->
+    ${isisOptions.length > 0 ? `
+    <div class="card" style="margin-bottom:16px;border-color:rgba(139,92,246,0.35)">
+      <div class="card-title" style="color:#a78bfa">
+        📡 Rerouteo ISIS — rutas alternativas
+        <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:8px">— menor métrica = camino preferido</span>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr>
+            <th>Lambda</th><th style="text-align:center">Métrica</th>
+            <th>Sitio remoto</th><th>Cap. ISP remota</th>
+          </tr></thead>
+          <tbody>
+            ${isisOptions.map((r, idx) => {
+              const hasCap   = r.remote_isp_capacity_gbps > 0;
+              const rowStyle = idx === 0 ? 'background:rgba(139,92,246,0.07)' : '';
+              return `
+              <tr style="${rowStyle}">
+                <td style="font-size:11px">${r.lambda_name}${idx === 0 ? ' <span style="color:#a78bfa;font-size:10px">← preferida</span>' : ''}</td>
+                <td style="text-align:center;font-family:var(--font-mono);color:var(--accent-cyan)">${r.isis_metric}</td>
+                <td style="font-family:var(--font-mono);font-size:11px">${r.remote_site_name}</td>
+                <td style="color:${hasCap ? 'var(--accent-green)' : 'var(--accent-red)'};font-weight:600">
+                  ${r.remote_isp_capacity_gbps} Gbps${!hasCap ? ' ✗' : ''}
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+
+    ${flows.length === 0 && lambdaNames.length === 0 ? `
+    <div class="card" style="border-color:rgba(0,255,128,0.3);background:rgba(0,255,128,0.04)">
+      <div class="card-title" style="color:var(--accent-green)">✅ Sin impacto en tráfico ISP ni lambdas</div>
+      <p style="font-size:13px;margin:0;color:var(--text-secondary)">
+        El ruteador <b>${result.router_name || '—'}</b> no tiene flujos ISP ni lambdas activas que lo atraviesen.
+      </p>
+    </div>
     ` : ''}
   `;
 }

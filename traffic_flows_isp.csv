@@ -1,0 +1,13 @@
+Sitio,PGW,Cirion - Cirion Mirlo,Cirion - Cirion Humbold,Cirion - Cirion Zurich,Gold Data - Reynosa Iusatel,Gold Data - Nuevo Laredo,Arelion - Cd Juarez,Cirion - MSO KIO Tultitlan,Axtel - MSO Merida,Meta - KIO Networks Queretaro,Amazon - KIO Networks Queretaro,Akamai - KIO Networks Queretaro
+MSO Apodaca,PGW1,,30,,,,,,,2,1,1
+MSO Apodaca,PGW2,,,,,30,,,,2,1,1
+MSO Megacentro,PGW1,,,30,,,,,,2,1,1
+MSO Megacentro,PGW2,,,,,30,,,,2,1,1
+MSO Toluca,PGW1,,,30,,,,,,2,1,1
+MSO Toluca,PGW2,,,,30,,,,,2,1,1
+MSO Tlaquepaque,PGW1,30,,,,,,,,2,1,1
+MSO Tlaquepaque,PGW2,3,,,,30,,,,2,1,1
+MSO Tultitlan KIO,PGW1,,,,,,,30,,2,1,1
+MSO Tultitlan KIO,PGW2,,,,30,,,,,2,1,1
+MSO Merida,PGW1,,,,,,,,30,2,1,1
+MSO Merida,PGW2,,,,30,,,,,2,1,1
