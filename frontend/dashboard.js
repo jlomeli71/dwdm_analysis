@@ -246,7 +246,7 @@ function renderCharts(segUsage, providers) {
           ...chartDefaults.plugins,
           tooltip: { callbacks: { label: ctx => `${ctx.parsed.y} lambdas (${((ctx.parsed.y/96)*100).toFixed(1)}%)` } },
         },
-        scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, max: 96, title: { display: true, text: 'Lambdas', color: '#8892a4' } } },
+        scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, max: 20, title: { display: true, text: 'Lambdas', color: '#8892a4' } } },
       },
     });
   }
@@ -432,7 +432,49 @@ async function renderISPSection(forceRefetch = false) {
           </tbody>
         </table>
       </div>
-    </div>`;
+    </div>
+
+    <!-- Detalle Proveedores ISP por Sitio -->
+    <div class="dash-card" style="margin-top:16px;">
+      <div class="dash-card-title">Detalle Proveedores ISP por Sitio</div>
+      <table class="dash-table" style="width:100%">
+        <thead><tr>
+          <th>Proveedor ISP</th><th>Sitio</th><th style="text-align:right">Interfaces</th><th style="text-align:right">Capacidad (Gbps)</th>
+        </tr></thead>
+        <tbody>
+          ${(() => {
+            // Construir filas: por cada router, por cada interfaz ISP → proveedor + sitio + capacidad
+            const rows = [];
+            routers.forEach(r => {
+              const ispIfaces = (r.interfaces || []).filter(i => i.iface_type === 'isp');
+              // Agrupar por proveedor dentro del mismo router
+              const byProv = {};
+              ispIfaces.forEach(iface => {
+                const prov = isps.find(p => p.id === iface.isp_provider_id);
+                if (!prov) return;
+                const key = `${prov.id}__${r.site_id}`;
+                if (!byProv[key]) byProv[key] = { provName: prov.name, provColor: prov.color, siteName: r.site_name || r.site_id, count: 0 };
+                byProv[key].count++;
+              });
+              Object.values(byProv).forEach(v => rows.push(v));
+            });
+            // Ordenar por proveedor, luego por sitio
+            rows.sort((a, b) => a.provName.localeCompare(b.provName) || a.siteName.localeCompare(b.siteName));
+            if (!rows.length) return '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px">Sin datos</td></tr>';
+            return rows.map(row => `<tr>
+              <td><span style="display:inline-flex;align-items:center;gap:8px;">
+                <span style="width:10px;height:10px;border-radius:50%;background:${row.provColor};flex-shrink:0;display:inline-block;"></span>
+                <b>${row.provName}</b>
+              </span></td>
+              <td>${row.siteName}</td>
+              <td style="text-align:right">${row.count}</td>
+              <td style="text-align:right;font-weight:600;color:var(--accent-cyan)">${row.count * 100} Gbps</td>
+            </tr>`).join('');
+          })()}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
 
   inner.appendChild(section);
 

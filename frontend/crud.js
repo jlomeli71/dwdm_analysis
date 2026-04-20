@@ -539,7 +539,7 @@ function renderRoutersTable() {
   const tbody = document.getElementById("routers-tbody");
   if (!tbody) return;
 
-  const brandLabel = { cisco: "🔵 Cisco", juniper: "🟢 Juniper", cirion: "🟠 Cirion" };
+  const brandLabel = { cisco: "🔵 Cisco", juniper: "🟢 Juniper", cirion: "🟠 Cirion", axtel: "🔴 Axtel" };
 
   tbody.innerHTML = filtered.map(r => {
     const lambdaIfaces = (r.interfaces || []).filter(i => i.iface_type === "lambda").length;
@@ -626,6 +626,7 @@ function openRouterModal(router = null) {
             <option value="cisco"${router?.brand === "cisco" ? " selected" : ""}>🔵 Cisco</option>
             <option value="juniper"${router?.brand === "juniper" ? " selected" : ""}>🟢 Juniper</option>
             <option value="cirion"${router?.brand === "cirion" ? " selected" : ""}>🟠 Cirion</option>
+            <option value="axtel"${router?.brand === "axtel" ? " selected" : ""}>🔴 Axtel</option>
           </select>
         </div>
         <div class="form-group full">

@@ -1,6 +1,6 @@
 # SPEC_ISP.md — Requerimientos y Tareas: Capa IP/ISP
 
-> Estado actualizado al 2026-04-16 (branch `new_feature_isp`)
+> Estado actualizado al 2026-04-20 (branch `new_feature_isp`)
 
 ---
 
@@ -122,6 +122,6 @@ La red cuenta con ruteadores marca Cisco y Juniper principalmente. Por simplicid
 
 - [ ] Protección 1+1 en ISP: simular falla de dos proveedores simultáneos y calcular impacto agregado
 - [ ] Simulación automática de fallas múltiples con reporte de escenarios más críticos
-- [ ] Agregar lambda "Cd Juarez to Toluca" — color pendiente de asignar
+- [x] Agregar lambda "Cd Juarez to Toluca" — color `#D2691E` (Chocolate) asignado en `seed.py`
 - [ ] Interfaces a switches de Data Center (fuera de alcance actual, se agregarán en fase posterior)
 - [ ] Historial de utilización: gráficas de tendencia por lambda y por proveedor a lo largo de los meses importados

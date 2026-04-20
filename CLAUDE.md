@@ -554,7 +554,7 @@ LAMBDA_PATHS = [
 
     {
         "name": "Cd Juarez to Toluca",
-        "color": "",          # Selecciona un color que no se use
+        "color": "#D2691E",   # Chocolate
         "num_lambdas": 1,
         "capacity_per_lambda": 100,
         "protection_route": None,
@@ -940,9 +940,9 @@ GET    /api/v1/reports/{name}               → Descarga reporte (PDF/Excel/CSV)
 - [x] Eliminar sección "Utilización Histórica" — **COMPLETADO**: modelo `LambdaUtilization` eliminado, endpoints y UI removidos
 - [x] Simulación de falla de ruteador — **COMPLETADO**: modo "Falla Ruteador" en `simulation.js`; endpoint `POST /simulation/router`; muestra flujos ISP, lambdas, fallback BGP e ISIS rerouteo
 - [x] Reporte de análisis completo — **COMPLETADO**: `GET /simulation/report`; adecuación de prioridades, ranking lambdas críticas, ranking providers; exportación CSV
-- [ ] Coordenadas de MSOMEX05 (lat=16.9, lon=-100.1) son aproximadas — verificar y corregir desde UI "Gestión de Red"
-- [ ] Documentar proveedores de fibra exactos por segmento (campo `fiber_provider` ya disponible en estructura)
+- [x] Coordenadas de MSOMEX05 (lat=16.912386, lon=-100.092827) — verificadas y aprobadas
+- [ ] Documentar proveedores de fibra exactos en segmentos con `fiber_provider = Unknown` (en validación)
 - [ ] Registrar amplificadores ópticos (OLAs/EDFAs) intermedios cuando se tenga la información
-- [ ] Definir rutas de protección 1+1 para todas las lambdas (`protection_route` ya disponible; actualmente solo KIO y Cirion las tienen definidas)
+- [x] Protección 1+1 para lambdas DWDM — **decisión**: la protección se gestiona a nivel red IP (BGP/ISIS), no a nivel DWDM. No se requiere definir `protection_route` para lambdas adicionales.
 - [ ] Definir política de alertas cuando un segmento supere el 80% (≥77 lambdas de 96 posibles)
-- [ ] Lambda "Cd Juarez to Toluca" — color pendiente de asignar (campo `color` vacío en `seed.py`)
+- [x] Lambda "Cd Juarez to Toluca" — color `#D2691E` (Chocolate) asignado en `seed.py`

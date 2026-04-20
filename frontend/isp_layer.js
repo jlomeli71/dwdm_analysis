@@ -31,63 +31,85 @@ export async function renderISPLayer(container) {
         <span>Capa IP / ISP</span>
       </div>
       <div class="isp-toolbar-actions">
-        <button class="btn-tool active" id="isp-btn-graph">Grafo lógico</button>
         <button class="btn-tool" id="isp-btn-save-pos" title="Guardar posiciones de nodos">💾 Guardar posiciones</button>
         <button class="btn-tool" id="isp-btn-reset-pos" title="Restablecer layout automático">↺ Restablecer layout</button>
         <button class="btn-tool" id="isp-btn-reload" title="Recargar datos">↺ Actualizar</button>
+        <button class="btn-tool isp-lag-btn" id="isp-lag-toggle" title="Agrupar interfaces como LAG" style="display:none">⚡ LAG</button>
       </div>
     </div>
 
-    <div class="isp-layout">
-      <!-- Visualización D3 -->
+    <!-- Pestañas -->
+    <div class="isp-tabs" id="isp-tabs">
+      <button class="isp-tab active" data-tab="graph">🗾 Grafo lógico</button>
+      <button class="isp-tab" data-tab="capacity">📦 Capacidad ISP</button>
+      <button class="isp-tab" data-tab="traffic">📊 Tráfico / Uso</button>
+      <button class="isp-tab" data-tab="priorities">🎯 Prioridades</button>
+      <button class="isp-tab" data-tab="metrics">📡 Métricas ISIS</button>
+      <button class="isp-tab" data-tab="report">📋 Análisis Fallas</button>
+      <button class="isp-tab" data-tab="validation">🔍 Validación Lambda</button>
+    </div>
+
+    <!-- Paneles de pestaña -->
+    <div class="isp-tab-panel active" id="isp-panel-graph">
       <div class="isp-graph-wrap" id="isp-graph-wrap">
         <svg id="isp-svg" style="width:100%;height:100%"></svg>
       </div>
+    </div>
 
-      <!-- Panel derecho: matrices + métricas ISIS -->
-      <div class="isp-matrix-panel" id="isp-matrix-panel">
-
-        <!-- 2.2 Capacidad ISP -->
-        <div class="isp-matrix-header">
-          <span>📦 Capacidad ISP</span>
-          <span class="isp-matrix-sub">Interfaces físicas por proveedor y sitio</span>
-          <button class="btn-tool btn-sm isp-lag-btn" id="isp-lag-toggle" title="Agrupar interfaces como LAG">⚡ LAG</button>
-        </div>
-        <div id="isp-capacity-content"><div class="isp-loading">Cargando…</div></div>
-
-        <!-- 2.3 Tráfico / Uso -->
-        <div class="isp-matrix-header">
-          <span>📊 Tráfico / Uso</span>
-          <span class="isp-matrix-sub">Gbps por flujo — editable · 🟢&lt;60% 🟡60-79% 🔴≥80%</span>
-        </div>
-        <div id="isp-matrix-content"><div class="isp-loading">Cargando…</div></div>
-
-        <!-- Prioridades ISP -->
-        <div class="isp-matrix-header">
-          <span>🎯 Prioridades ISP</span>
-          <span class="isp-matrix-sub">Orden de uso por PGW · 1=Primario 2=Secundario 3=Terciario</span>
-        </div>
-        <div id="isp-priority-content"><div class="isp-loading">Cargando…</div></div>
-
-        <!-- Métricas ISIS -->
-        <div class="isp-metrics-header">
-          <span>📡 Métricas ISIS</span>
-          <span class="isp-matrix-sub">Cisco &amp; Juniper · default 10 · rango 1–16 777 214</span>
-        </div>
-        <div id="isp-metrics-content"><div class="isp-loading">Cargando…</div></div>
-
-        <!-- Análisis de Fallas -->
-        <div class="isp-matrix-header">
-          <span>📊 Análisis de Fallas</span>
-          <span class="isp-matrix-sub">Adecuación de prioridades · Criticidad de lambdas e ISPs</span>
-        </div>
-        <div id="isp-report-content">
-          <div style="padding:12px">
-            <button class="btn-tool" id="isp-report-btn">📊 Generar Reporte Completo</button>
-          </div>
-          <div id="isp-report-result"></div>
-        </div>
+    <div class="isp-tab-panel" id="isp-panel-capacity">
+      <div class="isp-matrix-header">
+        <span>📦 Capacidad ISP</span>
+        <span class="isp-matrix-sub">Interfaces físicas por proveedor y sitio</span>
       </div>
+      <div id="isp-capacity-content"><div class="isp-loading">Cargando…</div></div>
+    </div>
+
+    <div class="isp-tab-panel" id="isp-panel-traffic">
+      <div class="isp-matrix-header">
+        <span>📊 Tráfico / Uso</span>
+        <span class="isp-matrix-sub">Gbps por flujo — editable · 🟢&lt;60% 🟡60-79% 🔴≥80%</span>
+      </div>
+      <div id="isp-matrix-content"><div class="isp-loading">Cargando…</div></div>
+    </div>
+
+    <div class="isp-tab-panel" id="isp-panel-priorities">
+      <div class="isp-matrix-header">
+        <span>🎯 Prioridades ISP</span>
+        <span class="isp-matrix-sub">Orden de uso por PGW · 1=Primario 2=Secundario 3=Terciario</span>
+      </div>
+      <div id="isp-priority-content"><div class="isp-loading">Cargando…</div></div>
+    </div>
+
+    <div class="isp-tab-panel" id="isp-panel-metrics">
+      <div class="isp-metrics-header">
+        <span>📡 Métricas ISIS</span>
+        <span class="isp-matrix-sub">Cisco &amp; Juniper · default 10 · rango 1–16 777 214</span>
+      </div>
+      <div id="isp-metrics-content"><div class="isp-loading">Cargando…</div></div>
+    </div>
+
+    <div class="isp-tab-panel" id="isp-panel-report">
+      <div class="isp-matrix-header">
+        <span>📋 Análisis de Fallas</span>
+        <span class="isp-matrix-sub">Adecuación de prioridades · Criticidad de lambdas e ISPs</span>
+      </div>
+      <div id="isp-report-content">
+        <div style="padding:12px">
+          <button class="btn-tool" id="isp-report-btn">📊 Generar Reporte Completo</button>
+        </div>
+        <div id="isp-report-result"></div>
+      </div>
+    </div>
+
+    <div class="isp-tab-panel" id="isp-panel-validation">
+      <div class="isp-matrix-header" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span>🔍 Validación de Conectividad Lambda</span>
+          <span class="isp-matrix-sub" id="isp-val-summary">Verificando…</span>
+        </div>
+        <button class="btn-tool" id="isp-val-revalidate" title="Recargar datos y revalidar conectividad">🔄 Revalidar</button>
+      </div>
+      <div id="isp-validation-content"><div class="isp-loading">Cargando…</div></div>
     </div>
   </div>`;
 
@@ -97,6 +119,25 @@ export async function renderISPLayer(container) {
   renderMatrix();
   renderPriorityMatrix();
   renderISPMetrics();
+  renderValidation();
+
+  // ── Lógica de pestañas ────────────────────────────────────────────────────
+  const PANELS = ['graph','capacity','traffic','priorities','metrics','report','validation'];
+  document.getElementById('isp-tabs').addEventListener('click', e => {
+    const btn = e.target.closest('.isp-tab');
+    if (!btn) return;
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.isp-tab').forEach(b => b.classList.toggle('active', b === btn));
+    PANELS.forEach(id => {
+      const panel = document.getElementById(`isp-panel-${id}`);
+      if (panel) panel.classList.toggle('active', id === tab);
+    });
+    // Mostrar/ocultar botón LAG solo en pestaña Capacidad
+    const lagBtn = document.getElementById('isp-lag-toggle');
+    if (lagBtn) lagBtn.style.display = tab === 'capacity' ? '' : 'none';
+    // Re-render grafo si se regresa a esa pestaña (por si el contenedor cambió de tamaño)
+    if (tab === 'graph') renderGraph();
+  });
 
   // LAG toggle
   let lagGrouped = false;
@@ -126,10 +167,23 @@ export async function renderISPLayer(container) {
     renderMatrix();
     renderPriorityMatrix();
     renderISPMetrics();
+    renderValidation();
   });
 
   document.getElementById("isp-report-btn")?.addEventListener("click", renderSimulationReport);
+
+  // Botón Revalidar: recarga datos y re-ejecuta la validación
+  document.getElementById("isp-val-revalidate")?.addEventListener("click", async () => {
+    const btn = document.getElementById("isp-val-revalidate");
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Validando…"; }
+    const content = document.getElementById("isp-validation-content");
+    if (content) content.innerHTML = `<div class="isp-loading">Recargando datos…</div>`;
+    await loadData();
+    renderValidation();
+    if (btn) { btn.disabled = false; btn.textContent = "🔄 Revalidar"; }
+  });
 }
+
 
 // ── Carga de datos ────────────────────────────────────────────────────────────
 async function loadData() {
@@ -438,7 +492,7 @@ function renderCapacityMatrix(lagGrouped = false) {
     const [a, b] = [ends.ingress, ends.egress].sort();
     if (!rtrSites.has(a) || !rtrSites.has(b)) return;
     const key = `${a}|${b}`;
-    lambdaCap[key] = (lambdaCap[key] || 0) + (lm.capacity_per_lambda || 100);
+    lambdaCap[key] = (lambdaCap[key] || 0) + (lm.total_capacity_gbps || lm.num_lambdas * (lm.capacity_per_lambda || 100));
   });
 
   if (routerRows.length === 0) {
@@ -467,24 +521,34 @@ function renderCapacityMatrix(lagGrouped = false) {
         <span class="isp-provider-dot" style="background:${row.providerColor}"></span>${row.providerName}
       </td>
       <td class="isp-matrix-td">${ifaceDisplay}</td>
-      <td class="isp-matrix-td isp-matrix-td--total">${lagGrouped ? row.capGbps + " Gbps" : row.count + "×100G"}</td>
+      <td class="isp-matrix-td isp-matrix-td--total">${row.capGbps} Gbps${lagGrouped ? ` <span style="font-size:9px;opacity:0.7">(${row.count}×100G LAG)</span>` : ` <span style="font-size:9px;opacity:0.7">(${row.count}×100G)</span>`}</td>
     </tr>`;
   });
 
   // Separador y lambdas inter-router
   if (Object.keys(lambdaCap).length > 0) {
-    html += `<tr><td colspan="4" class="isp-matrix-th" style="font-size:11px;padding-top:8px">⚡ Capacidad Lambda inter-ruteador</td></tr>`;
     const siteNameMap = {};
     routers.forEach(r => { siteNameMap[r.site_id] = r.name || r.site_id; });
+    html += `<tr><td colspan="4" class="isp-matrix-th" style="font-size:11px;padding-top:8px">⚡ Capacidad Lambda inter-ruteador</td></tr>`;
+    html += `<tr>
+      <th class="isp-matrix-th" style="text-align:left">Sitio A</th>
+      <th class="isp-matrix-th" style="text-align:left">Sitio B</th>
+      <th class="isp-matrix-th">Enlace</th>
+      <th class="isp-matrix-th">Capacidad</th>
+    </tr>`;
     Object.entries(lambdaCap).forEach(([key, gbps]) => {
       const [a, b] = key.split("|");
+      const nameA = siteNameMap[a] || a;
+      const nameB = siteNameMap[b] || b;
       html += `<tr>
-        <td class="isp-matrix-td" colspan="2">${siteNameMap[a] || a} ↔ ${siteNameMap[b] || b}</td>
-        <td class="isp-matrix-td isp-matrix-td--cell"></td>
-        <td class="isp-matrix-td isp-matrix-td--total">${gbps} Gbps</td>
+        <td class="isp-matrix-td" style="text-align:left;white-space:nowrap"><code style="font-size:10px;color:var(--accent-cyan)">${a}</code><span style="font-size:10px;color:var(--text-muted);margin-left:4px">${nameA !== a ? nameA : ''}</span></td>
+        <td class="isp-matrix-td" style="text-align:left;white-space:nowrap"><code style="font-size:10px;color:var(--accent-cyan)">${b}</code><span style="font-size:10px;color:var(--text-muted);margin-left:4px">${nameB !== b ? nameB : ''}</span></td>
+        <td class="isp-matrix-td" style="font-size:10px;color:var(--text-secondary);white-space:nowrap">${nameA} ↔ ${nameB}</td>
+        <td class="isp-matrix-td isp-matrix-td--total">${gbps} Gbps <span style="font-size:9px;opacity:0.7">(${gbps / 100}×100G)</span></td>
       </tr>`;
     });
   }
+
 
   html += `</tbody></table></div>
     <div class="isp-matrix-note">Capacidad física disponible. ⚡ LAG agrupa interfaces por proveedor.</div>`;
@@ -709,7 +773,128 @@ function renderISPMetrics() {
   });
 }
 
-// ── Utilidades ────────────────────────────────────────────────────────────────
+// ── Validación de Conectividad Lambda ─────────────────────────────────────────
+function renderValidation() {
+  const content = document.getElementById('isp-validation-content');
+  const summary = document.getElementById('isp-val-summary');
+  if (!content) return;
+
+  // Construir mapa: site_id → lista de interfaces lambda por lambda_id
+  // routerIfaceMap[site_id][lambda_id] = count de interfaces conectadas
+  const routerIfaceMap = {};
+  const routerNameMap  = {};
+  routers.forEach(r => {
+    routerNameMap[r.site_id] = r.name;
+    routerIfaceMap[r.site_id] = routerIfaceMap[r.site_id] || {};
+    (r.interfaces || []).filter(i => i.iface_type === 'lambda' && i.lambda_id).forEach(i => {
+      routerIfaceMap[r.site_id][i.lambda_id] = (routerIfaceMap[r.site_id][i.lambda_id] || 0) + 1;
+    });
+  });
+
+  // Prioridad de estado para ordenar (menor = más grave)
+  const STATUS_PRI  = { missing: 0, 'no-router': 1, partial: 2, 'no-segments': 3, ok: 4 };
+  const STATUS_ICON = {
+    ok:           { icon: '✅', label: 'OK',              cls: 'val-ok'       },
+    partial:      { icon: '⚠️', label: 'Parcial',         cls: 'val-partial'  },
+    missing:      { icon: '🔴', label: 'Sin interfaz',    cls: 'val-missing'  },
+    'no-router':  { icon: '🔴', label: 'Sin ruteador',    cls: 'val-missing'  },
+    'no-segments':{ icon: '⬜', label: 'Sin segmentos',   cls: 'val-noseg'    },
+  };
+
+  function sideStatus(lm, siteId) {
+    if (!siteId) return 'no-segments';
+    if (!routerIfaceMap[siteId]) return 'no-router';
+    const count = routerIfaceMap[siteId][lm.id] || 0;
+    if (count === 0)               return 'missing';
+    if (count < lm.num_lambdas)    return 'partial';
+    return 'ok';
+  }
+
+  function ifaceDetail(lm, siteId) {
+    if (!siteId || !routerIfaceMap[siteId]) return '—';
+    const count = routerIfaceMap[siteId][lm.id] || 0;
+    return count > 0 ? `${count} iface${count > 1 ? 's' : ''}` : 'ninguna';
+  }
+
+  const results = lambdas.map(lm => {
+    const ends = _lambdaEndpoints(lm);
+    const siteA = ends?.ingress || null;
+    const siteB = ends?.egress  || null;
+    const stA   = sideStatus(lm, siteA);
+    const stB   = sideStatus(lm, siteB);
+    const worst = STATUS_PRI[stA] <= STATUS_PRI[stB] ? stA : stB;
+    return { lm, siteA, siteB, stA, stB, worst };
+  });
+
+  results.sort((a, b) => STATUS_PRI[a.worst] - STATUS_PRI[b.worst]);
+
+  const alarms   = results.filter(r => !['ok','no-segments'].includes(r.worst));
+  const ok       = results.filter(r => r.worst === 'ok');
+  const noSegs   = results.filter(r => r.worst === 'no-segments');
+  const total    = results.length;
+
+  // Actualizar resumen del header
+  if (summary) {
+    if (alarms.length === 0) {
+      summary.innerHTML = `<span style="color:var(--accent-green);font-weight:600">✅ ${ok.length}/${total} lambdas OK</span>`;
+    } else {
+      summary.innerHTML = `<span style="color:var(--accent-red);font-weight:600">🔴 ${alarms.length} alarma${alarms.length > 1 ? 's' : ''}</span>
+        <span style="color:var(--text-muted)"> · ${ok.length} OK · ${noSegs.length} sin segmentos</span>`;
+    }
+  }
+
+  let html = `<div class="isp-matrix-scroll"><table class="isp-matrix-table" style="min-width:700px">
+    <thead><tr>
+      <th class="isp-matrix-th" style="text-align:left">Lambda</th>
+      <th class="isp-matrix-th">λ</th>
+      <th class="isp-matrix-th">Extremo A (Ingress)</th>
+      <th class="isp-matrix-th">Ruteador A</th>
+      <th class="isp-matrix-th">Interfaces A</th>
+      <th class="isp-matrix-th">Extremo B (Egress)</th>
+      <th class="isp-matrix-th">Ruteador B</th>
+      <th class="isp-matrix-th">Interfaces B</th>
+      <th class="isp-matrix-th">Estado</th>
+    </tr></thead>
+    <tbody>`;
+
+  results.forEach(({ lm, siteA, siteB, stA, stB, worst }) => {
+    const iA = STATUS_ICON[stA];
+    const iB = STATUS_ICON[stB];
+    const rowBg = worst === 'ok' ? '' : worst === 'no-segments' ? 'opacity:0.6;' : 'background:rgba(239,68,68,0.06);';
+    const rNameA = siteA ? (routerNameMap[siteA] || '—') : '—';
+    const rNameB = siteB ? (routerNameMap[siteB] || '—') : '—';
+    html += `<tr style="${rowBg}">
+      <td class="isp-matrix-td" style="text-align:left;white-space:nowrap">
+        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${lm.color};margin-right:6px;flex-shrink:0;vertical-align:middle"></span>
+        <b style="font-size:11px">${lm.name}</b>
+      </td>
+      <td class="isp-matrix-td" style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">${lm.num_lambdas}×100G</td>
+      <td class="isp-matrix-td"><code style="font-size:10px;color:var(--accent-cyan)">${siteA || '—'}</code></td>
+      <td class="isp-matrix-td" style="font-size:10px;color:var(--text-secondary);white-space:nowrap">${rNameA}</td>
+      <td class="isp-matrix-td">
+        <span class="isp-val-badge ${iA.cls}">${iA.icon} ${stA === 'ok' ? ifaceDetail(lm, siteA) : iA.label}</span>
+      </td>
+      <td class="isp-matrix-td"><code style="font-size:10px;color:var(--accent-cyan)">${siteB || '—'}</code></td>
+      <td class="isp-matrix-td" style="font-size:10px;color:var(--text-secondary);white-space:nowrap">${rNameB}</td>
+      <td class="isp-matrix-td">
+        <span class="isp-val-badge ${iB.cls}">${iB.icon} ${stB === 'ok' ? ifaceDetail(lm, siteB) : iB.label}</span>
+      </td>
+      <td class="isp-matrix-td">
+        <span class="isp-val-badge ${STATUS_ICON[worst].cls}" style="font-weight:700">${STATUS_ICON[worst].icon} ${STATUS_ICON[worst].label}</span>
+      </td>
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>
+    <div class="isp-matrix-note">
+      ✅ OK = interfaces ≥ num_lambdas en ambos extremos &nbsp;·&nbsp;
+      ⚠️ Parcial = interfaces configuradas pero insuficientes &nbsp;·&nbsp;
+      🔴 Sin interfaz / Sin ruteador = alarma activa
+    </div>`;
+  content.innerHTML = html;
+}
+
+
 
 function _ensureTooltip() {
   let tt = document.getElementById("isp-tooltip");

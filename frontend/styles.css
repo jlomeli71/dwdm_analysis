@@ -1064,16 +1064,42 @@ body.light #theme-toggle:hover {
 
 .isp-page { display: flex; flex-direction: column; height: 100%; gap: 16px; }
 
-.isp-layout {
+/* Tab navigation */
+.isp-tabs {
   display: flex;
-  gap: 16px;
-  flex: 1;
-  min-height: 0;
+  gap: 4px;
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 0;
+  flex-shrink: 0;
 }
+.isp-tab {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  border-radius: 6px 6px 0 0;
+  transition: color var(--tr), border-color var(--tr), background var(--tr);
+  white-space: nowrap;
+}
+.isp-tab:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.isp-tab.active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); }
+
+/* Tab panels */
+.isp-tab-panel { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.isp-tab-panel.active { display: flex; }
+
+/* Graph panel fills all available height */
+.isp-panel-graph { flex: 1; min-height: 0; }
 
 .isp-graph-wrap {
   flex: 1;
-  min-width: 0;
+  min-height: 560px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1081,15 +1107,6 @@ body.light #theme-toggle:hover {
   position: relative;
 }
 
-.isp-graph-wrap svg { width: 100%; height: 100%; }
-
-.isp-matrix-panel {
-  flex: 0 0 420px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  overflow-y: auto;
-}
 
 /* Traffic matrix table */
 .isp-matrix-table {
@@ -1427,3 +1444,18 @@ body.light #theme-toggle:hover {
 .isp-flag-double-lambda { background: rgba(234,179,8,0.20); color: var(--accent-yellow); }
 .isp-flag-unknown-site  { background: rgba(239,68,68,0.20);  color: var(--accent-red); }
 
+/* ── Validación Lambda — badges de estado ──────────────────── */
+.isp-val-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.val-ok      { background: rgba(34,197,94,0.12);   color: var(--accent-green); }
+.val-partial { background: rgba(234,179,8,0.15);   color: var(--accent-yellow); }
+.val-missing { background: rgba(239,68,68,0.15);   color: var(--accent-red); }
+.val-noseg   { background: rgba(140,150,170,0.12); color: var(--text-muted); }
