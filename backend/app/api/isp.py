@@ -270,78 +270,119 @@ def simulate_isp_provider():
         isp_provider_id=provider.id,
     ).count()
 
-    # ── Prioridades ISP: identificar qué proveedor absorbe el tráfico ─────────
+    # ── Redistribución basada en prioridades ISP, agrupada por (egress, pgw) ──
+    # Cada (egress, pgw) tiene sus propios fallbacks; se calcula redistribución
+    # de forma independiente para evitar mezclar fallbacks de distintos PGW.
+
+    from collections import defaultdict
+
+    # Agrupar flujos afectados por (egress_site_id, pgw)
+    pgw_flow_groups: dict[tuple, list] = defaultdict(list)
+    for flow in affected_flows:
+        pgw_flow_groups[(flow.egress_site_id, flow.pgw)].append(flow)
+
+    # Cache de capacidad por (provider_id, ingress_site_id) para no re-consultar
+    _fb_cap_cache: dict[tuple, dict] = {}
+
+    def _get_fb_capacity(prov_id: int, ingress: str) -> dict:
+        key = (prov_id, ingress)
+        if key not in _fb_cap_cache:
+            fb_router = Router.query.filter_by(site_id=ingress).first()
+            if not fb_router:
+                _fb_cap_cache[key] = {"capacity_gbps": 0, "used_gbps": 0, "available_gbps": 0}
+            else:
+                fb_ifaces = RouterInterface.query.filter_by(
+                    router_id=fb_router.id, iface_type="isp", isp_provider_id=prov_id
+                ).count()
+                fb_used = sum(
+                    f.traffic_gbps
+                    for f in TrafficFlow.query.filter_by(
+                        isp_provider_id=prov_id, ingress_site_id=ingress
+                    ).all()
+                )
+                cap = fb_ifaces * 100
+                _fb_cap_cache[key] = {
+                    "capacity_gbps": cap,
+                    "used_gbps":     fb_used,
+                    "available_gbps": max(0, cap - fb_used),
+                }
+        return _fb_cap_cache[key]
 
     priority_fallback = []
-    for flow in affected_flows:
-        pgw = flow.pgw
-        # Buscar proveedores de prioridad 2 y 3 para este PGW/egress
-        fallback_priorities = ISPPriority.query.filter_by(
-            egress_site_id=flow.egress_site_id,
-            pgw=pgw,
-        ).filter(ISPPriority.priority_level > 1).order_by(ISPPriority.priority_level).all()
-
-        for fp in fallback_priorities:
-            if fp.isp_provider_id != provider.id:
-                priority_fallback.append({
-                    "pgw":                 pgw,
-                    "egress_site_id":      flow.egress_site_id,
-                    "egress_site_name":    flow.egress_site.name if flow.egress_site else flow.egress_site_id,
-                    "fallback_provider":   fp.isp_provider.name if fp.isp_provider else None,
-                    "fallback_color":      fp.isp_provider.color if fp.isp_provider else None,
-                    "fallback_ingress":    fp.ingress_site_id,
-                    "priority_level":      fp.priority_level,
-                    "traffic_at_risk_gbps": flow.traffic_gbps,
-                })
-
-    # ── Capacidad disponible de OTROS proveedores en el mismo sitio ───────────
-
-    from ..models import ISPProvider as ISP
-    other_providers = db.session.query(ISP).join(RouterInterface).filter(
-        RouterInterface.router_id == router.id,
-        RouterInterface.iface_type == "isp",
-        RouterInterface.isp_provider_id != provider.id,
-    ).distinct().all()
-
-    other_summary = []
-    for op in other_providers:
-        op_ifaces_total = RouterInterface.query.filter_by(
-            router_id=router.id, iface_type="isp", isp_provider_id=op.id
-        ).count()
-        op_used_gbps = sum(
-            f.traffic_gbps
-            for f in TrafficFlow.query.filter_by(isp_provider_id=op.id, ingress_site_id=site_id).all()
-        )
-        op_capacity_gbps = op_ifaces_total * 100
-        op_avail_gbps = max(0, op_capacity_gbps - op_used_gbps)
-        other_summary.append({
-            "provider":          op.name,
-            "color":             op.color,
-            "capacity_gbps":     op_capacity_gbps,
-            "used_gbps":         op_used_gbps,
-            "available_gbps":    op_avail_gbps,
-        })
-
-    available_gbps = sum(s["available_gbps"] for s in other_summary)
-    deficit_gbps   = max(0, affected_gbps - available_gbps)
-
-    # ── Redistribución proporcional (local) ────────────────────────────────────
-
     redistribution_detail = []
-    if available_gbps > 0 and affected_gbps > 0:
-        for s in other_summary:
-            if s["available_gbps"] > 0:
-                prop          = s["available_gbps"] / available_gbps
-                absorbed_gbps = round(affected_gbps * prop, 1)
-                redistribution_detail.append({
-                    "provider":       s["provider"],
-                    "color":          s["color"],
-                    "capacity_gbps":  s["capacity_gbps"],
-                    "absorbed_gbps":  absorbed_gbps,
-                    "overloaded":     absorbed_gbps > s["capacity_gbps"],
-                })
+    total_avail_all = 0
+    total_deficit_all = 0
 
-    # ── Rerouteo ISIS por interfaces lambda (solo si hay déficit) ────────────
+    for (egress, pgw), flows_grp in sorted(pgw_flow_groups.items()):
+        grp_affected = sum(f.traffic_gbps for f in flows_grp)
+        egress_name  = flows_grp[0].egress_site.name if flows_grp[0].egress_site else egress
+
+        # Fallbacks para este (egress, pgw): todos los proveedores ≠ fallido
+        fb_priorities = ISPPriority.query.filter_by(
+            egress_site_id=egress, pgw=pgw,
+        ).filter(
+            ISPPriority.isp_provider_id != provider.id,
+        ).order_by(ISPPriority.priority_level).all()
+
+        # Deduplicar dentro de este grupo (egress, pgw)
+        seen_in_grp: set[tuple] = set()
+        grp_fallbacks = []
+        for fp in fb_priorities:
+            k = (fp.isp_provider_id, fp.ingress_site_id)
+            if k in seen_in_grp:
+                continue
+            seen_in_grp.add(k)
+            cap_info = _get_fb_capacity(fp.isp_provider_id, fp.ingress_site_id)
+            fb_entry = {
+                "egress_site_id":    egress,
+                "egress_site_name":  egress_name,
+                "pgw":               pgw,
+                "provider":          fp.isp_provider.name if fp.isp_provider else None,
+                "color":             fp.isp_provider.color if fp.isp_provider else None,
+                "ingress_site_id":   fp.ingress_site_id,
+                "ingress_site_name": fp.ingress_site.name if fp.ingress_site else fp.ingress_site_id,
+                "priority_level":    fp.priority_level,
+                **cap_info,
+            }
+            grp_fallbacks.append(fb_entry)
+            priority_fallback.append({
+                "pgw": pgw,
+                "egress_site_id": egress,
+                "egress_site_name": egress_name,
+                "fallback_provider": fb_entry["provider"],
+                "fallback_color":    fb_entry["color"],
+                "fallback_ingress":  fb_entry["ingress_site_id"],
+                "fallback_ingress_name": fb_entry["ingress_site_name"],
+                "priority_level":    fb_entry["priority_level"],
+                "traffic_at_risk_gbps": grp_affected,
+            })
+
+        grp_avail = sum(s["available_gbps"] for s in grp_fallbacks)
+        total_avail_all += grp_avail
+
+        # Redistribución ordenada por prioridad: P2 absorbe primero hasta su
+        # capacidad disponible; solo si desborda pasa al P3, y así sucesivamente.
+        # grp_fallbacks ya viene ordenado por priority_level (menor = mayor prioridad).
+        remaining = float(grp_affected)
+        for s in grp_fallbacks:
+            if remaining <= 0:
+                break
+            if s["available_gbps"] <= 0:
+                continue
+            absorbed  = round(min(remaining, s["available_gbps"]), 1)
+            remaining = round(remaining - absorbed, 1)
+            redistribution_detail.append({
+                **s,
+                "absorbed_gbps": absorbed,
+                "overloaded":    absorbed > s["capacity_gbps"],
+            })
+        grp_deficit = max(0.0, round(remaining, 1))
+        total_deficit_all += grp_deficit
+
+    available_gbps = total_avail_all
+    deficit_gbps   = total_deficit_all
+
+    # ── Rerouteo ISIS por interfaces lambda (si hay déficit) ─────────────────
 
     isis_rerouting = []
     if deficit_gbps > 0 and router.brand in ("cisco", "juniper"):
@@ -380,6 +421,54 @@ def simulate_isp_provider():
                 "remote_isp_available_gbps": remote_available,
             })
 
+    # ── Reconvergencia ISIS por redistribución a sitios remotos ──────────────
+    # Para cada entrada de redistribución donde el fallback ingresa por un sitio
+    # distinto al proveedor fallido, se busca la lambda que conecta el sitio de
+    # ingreso fallback directamente con el sitio egress (PGW destino).
+    # Solo se muestra esa lambda específica, no todas las del router fallback.
+
+    isis_reconvergence = []
+    seen_isis_iface: set = set()
+
+    for rd_entry in redistribution_detail:
+        fb_site_id   = rd_entry["ingress_site_id"]
+        fb_site_name = rd_entry["ingress_site_name"]
+        egress_site  = rd_entry["egress_site_id"]
+        egress_name  = rd_entry["egress_site_name"]
+
+        if fb_site_id == site_id:  # mismo sitio que el fallido → no hay traversal
+            continue
+
+        fb_router = Router.query.filter_by(site_id=fb_site_id).first()
+        if not fb_router:
+            continue
+
+        lambda_ifaces = [
+            i for i in fb_router.interfaces
+            if i.iface_type == "lambda" and i.lambda_ and i.isis_metric is not None
+        ]
+
+        for iface in sorted(lambda_ifaces, key=lambda x: x.isis_metric):
+            remote_site_id = _lambda_remote_site(iface.lambda_, fb_site_id)
+            # Solo la lambda cuyo extremo remoto ES el sitio egress (PGW destino)
+            if remote_site_id != egress_site:
+                continue
+            key = (fb_site_id, iface.id, egress_site)
+            if key in seen_isis_iface:
+                continue
+            seen_isis_iface.add(key)
+            isis_reconvergence.append({
+                "source_site_id":   fb_site_id,
+                "source_site_name": fb_site_name,
+                "egress_site_id":   egress_site,
+                "egress_site_name": egress_name,
+                "pgw":              rd_entry["pgw"],
+                "absorbed_gbps":    rd_entry["absorbed_gbps"],
+                "interface_name":   iface.name,
+                "lambda_name":      iface.lambda_.name,
+                "isis_metric":      iface.isis_metric,
+            })
+
     return jsonify({
         "provider":              provider_name,
         "provider_color":        provider.color,
@@ -394,6 +483,7 @@ def simulate_isp_provider():
         "priority_fallback":     priority_fallback,
         "redistribution_detail": redistribution_detail,
         "isis_rerouting":        isis_rerouting,
+        "isis_reconvergence":    isis_reconvergence,
         "affected_flows":        [f.to_dict() for f in affected_flows],
     })
 
@@ -448,13 +538,37 @@ def get_isp_priorities():
 
 @bp.put("/isp-priorities/<int:priority_id>")
 def update_isp_priority(priority_id):
-    """Actualiza el priority_level de un registro ISPPriority."""
+    """Actualiza priority_level y/o la asignación de proveedor de un ISPPriority."""
     priority = ISPPriority.query.get_or_404(priority_id)
-    data  = request.get_json(silent=True) or {}
-    level = data.get("priority_level")
+    data = request.get_json(silent=True) or {}
 
+    # Reasignación de proveedor
+    if "isp_provider_id" in data or "ingress_site_id" in data:
+        new_provider_id  = int(data.get("isp_provider_id",  priority.isp_provider_id))
+        new_ingress_site = data.get("ingress_site_id", priority.ingress_site_id)
+
+        provider = ISPProvider.query.get(new_provider_id)
+        if not provider:
+            return jsonify({"error": "Proveedor ISP no encontrado"}), 404
+
+        duplicate = ISPPriority.query.filter_by(
+            egress_site_id=priority.egress_site_id,
+            pgw=priority.pgw,
+            isp_provider_id=new_provider_id,
+            ingress_site_id=new_ingress_site,
+        ).filter(ISPPriority.id != priority_id).first()
+        if duplicate:
+            return jsonify({"error": "Proveedor ya asignado en otro nivel para este (sitio, PGW)"}), 409
+
+        priority.isp_provider_id = new_provider_id
+        priority.ingress_site_id = new_ingress_site
+        db.session.commit()
+        return jsonify(priority.to_dict())
+
+    # Solo priority_level
+    level = data.get("priority_level")
     if level is None or not isinstance(level, int) or level < 1:
-        return jsonify({"error": "priority_level debe ser un entero ≥ 1"}), 422
+        return jsonify({"error": "Se requiere priority_level o {isp_provider_id, ingress_site_id}"}), 422
 
     priority.priority_level = level
     db.session.commit()
@@ -570,68 +684,99 @@ def get_simulation_report():
     all_priorities = ISPPriority.query.all()
 
     # ── 1. Adecuación de prioridades ─────────────────────────────────────────
-    # Para cada (egress_site, pgw), verificar si el proveedor primario falla
-    # y los secundarios/terciarios tienen capacidad suficiente.
+    # Agrupa por proveedor P1 (la entidad que falla), no por (egress, pgw).
+    # Cuando un ISP cae afecta TODOS los sitios donde es primario simultáneamente;
+    # los proveedores de fallback tienen capacidad COMPARTIDA, no independiente.
 
     priority_adequacy = []
-    # Agrupar prioridades por (egress_site, pgw)
+
+    # Paso 1: agrupar prioridades por (egress, pgw)
     pgw_groups: dict[tuple, list] = {}
     for p in all_priorities:
         key = (p.egress_site_id, p.pgw)
         pgw_groups.setdefault(key, []).append(p)
 
-    for (egress, pgw), priorities in sorted(pgw_groups.items()):
+    # Paso 2: agrupar por proveedor P1 — la entidad que simularemos que falla
+    p1_groups: dict[tuple, list] = {}  # (p1_prov_id, p1_ingress) -> [(egress, pgw, priorities)]
+    for (egress, pgw), priorities in pgw_groups.items():
         priorities.sort(key=lambda x: x.priority_level)
         primary = next((p for p in priorities if p.priority_level == 1), None)
         if not primary:
             continue
+        p1_key = (primary.isp_provider_id, primary.ingress_site_id)
+        p1_groups.setdefault(p1_key, []).append((egress, pgw, priorities))
 
-        # Tráfico primario
-        primary_flows = [
-            f for f in all_flows
-            if f.isp_provider_id == primary.isp_provider_id
-            and f.ingress_site_id == primary.ingress_site_id
-            and f.egress_site_id == egress
-            and f.pgw == pgw
-        ]
-        primary_gbps = sum(f.traffic_gbps for f in primary_flows)
+    # Paso 3: evaluar cada falla de P1
+    for (p1_prov_id, p1_ingress), affected in sorted(
+        p1_groups.items(), key=lambda x: (x[0][1], x[0][0])
+    ):
+        p1_prov_obj = ISPProvider.query.get(p1_prov_id)
+        p1_site_obj = Site.query.get(p1_ingress)
 
-        # Capacidad de fallback (prioridades 2 y 3)
-        fallback_capacity = 0
-        fallback_details  = []
-        for fp in priorities:
-            if fp.priority_level == 1:
-                continue
-            fb_ifaces = RouterInterface.query.filter_by(
-                isp_provider_id=fp.isp_provider_id,
-            ).join(Router).filter(Router.site_id == fp.ingress_site_id).count()
-            fb_used = sum(
-                f.traffic_gbps
-                for f in all_flows
-                if f.isp_provider_id == fp.isp_provider_id
-                and f.ingress_site_id == fp.ingress_site_id
-                and f.egress_site_id == egress
+        # Tráfico total a redistribuir: suma de todos los sitios afectados
+        affected_sites_info = []
+        total_gbps = 0
+        for (egress, pgw, priorities) in affected:
+            priority_pairs = {(p.isp_provider_id, p.ingress_site_id) for p in priorities}
+            site_gbps = sum(
+                f.traffic_gbps for f in all_flows
+                if f.egress_site_id == egress
                 and f.pgw == pgw
+                and (f.isp_provider_id, f.ingress_site_id) in priority_pairs
             )
-            fb_avail = max(0, fb_ifaces * 100 - fb_used)
-            fallback_capacity += fb_avail
-            fallback_details.append({
-                "priority_level":    fp.priority_level,
-                "provider":          fp.isp_provider.name if fp.isp_provider else None,
-                "ingress_site_id":   fp.ingress_site_id,
-                "available_gbps":    fb_avail,
+            total_gbps += site_gbps
+            egress_obj = next(
+                (p.egress_site for p in priorities if p.egress_site_id == egress), None
+            )
+            affected_sites_info.append({
+                "egress_site_id":   egress,
+                "egress_site_name": egress_obj.name if egress_obj else egress,
+                "pgw":              pgw,
+                "traffic_gbps":     site_gbps,
             })
 
-        adequate = fallback_capacity >= primary_gbps
+        # Capacidad de fallback: proveedores P2+P3 deduplicados, con uso GLOBAL
+        # (un mismo proveedor que aparece como P2 en varios sitios tiene capacidad única)
+        fallback_providers: dict[tuple, dict] = {}
+        for (egress, pgw, priorities) in affected:
+            for fp in priorities:
+                if fp.priority_level == 1:
+                    continue
+                fb_key = (fp.isp_provider_id, fp.ingress_site_id)
+                if fb_key in fallback_providers:
+                    continue
+                fb_ifaces = RouterInterface.query.filter_by(
+                    isp_provider_id=fp.isp_provider_id,
+                ).join(Router).filter(Router.site_id == fp.ingress_site_id).count()
+                # Uso global actual: todo el tráfico que este proveedor ya carga
+                fb_used_global = sum(
+                    f.traffic_gbps for f in all_flows
+                    if f.isp_provider_id == fp.isp_provider_id
+                    and f.ingress_site_id == fp.ingress_site_id
+                )
+                fb_avail = max(0, fb_ifaces * 100 - fb_used_global)
+                fallback_providers[fb_key] = {
+                    "priority_level":    fp.priority_level,
+                    "provider":          fp.isp_provider.name if fp.isp_provider else None,
+                    "ingress_site_id":   fp.ingress_site_id,
+                    "ingress_site_name": fp.ingress_site.name if fp.ingress_site else fp.ingress_site_id,
+                    "capacity_gbps":     fb_ifaces * 100,
+                    "used_gbps":         fb_used_global,
+                    "available_gbps":    fb_avail,
+                }
+
+        fallback_capacity = sum(v["available_gbps"] for v in fallback_providers.values())
+        adequate = fallback_capacity >= total_gbps
         priority_adequacy.append({
-            "egress_site_id":     egress,
-            "egress_site_name":   primary.egress_site.name if primary.egress_site else egress,
-            "pgw":                pgw,
-            "primary_provider":   primary.isp_provider.name if primary.isp_provider else None,
-            "primary_gbps":       primary_gbps,
+            "primary_provider":       p1_prov_obj.name if p1_prov_obj else str(p1_prov_id),
+            "primary_ingress_site":   p1_site_obj.name if p1_site_obj else p1_ingress,
+            "primary_ingress_site_id": p1_ingress,
+            "primary_color":          p1_prov_obj.color if p1_prov_obj else "#888",
+            "total_gbps":             total_gbps,
             "fallback_capacity_gbps": fallback_capacity,
-            "adequate":           adequate,
-            "fallback_details":   fallback_details,
+            "adequate":               adequate,
+            "affected_sites":         affected_sites_info,
+            "fallback_details":       list(fallback_providers.values()),
         })
 
     # ── 2. Criticidad de lambdas (por tráfico afectado) ───────────────────────
@@ -649,21 +794,29 @@ def get_simulation_report():
         key=lambda x: x["traffic_at_risk_gbps"], reverse=True
     )
 
-    # ── 3. Criticidad de proveedores ISP ──────────────────────────────────────
+    # ── 3. Criticidad de proveedores ISP (por proveedor + sitio de ingreso) ──
 
-    provider_criticality: dict[str, dict] = {}
+    provider_criticality: dict[tuple, dict] = {}
     for flow in all_flows:
         if flow.traffic_gbps == 0:
             continue
-        pname = flow.isp_provider.name if flow.isp_provider else "Unknown"
-        pcolor = flow.isp_provider.color if flow.isp_provider else "#888"
-        if pname not in provider_criticality:
-            provider_criticality[pname] = {"traffic_gbps": 0, "color": pcolor, "flows": 0}
-        provider_criticality[pname]["traffic_gbps"] += flow.traffic_gbps
-        provider_criticality[pname]["flows"] += 1
+        pname   = flow.isp_provider.name  if flow.isp_provider  else "Unknown"
+        pcolor  = flow.isp_provider.color if flow.isp_provider  else "#888"
+        iname   = flow.ingress_site.name  if flow.ingress_site  else flow.ingress_site_id
+        key     = (pname, flow.ingress_site_id)
+        if key not in provider_criticality:
+            provider_criticality[key] = {
+                "traffic_gbps":    0,
+                "color":           pcolor,
+                "flows":           0,
+                "ingress_site_id": flow.ingress_site_id,
+                "ingress_site_name": iname,
+            }
+        provider_criticality[key]["traffic_gbps"] += flow.traffic_gbps
+        provider_criticality[key]["flows"] += 1
 
     provider_ranking = sorted(
-        [{"provider": k, **v} for k, v in provider_criticality.items()],
+        [{"provider": k[0], **v} for k, v in provider_criticality.items()],
         key=lambda x: x["traffic_gbps"], reverse=True
     )
 

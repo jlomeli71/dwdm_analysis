@@ -45,7 +45,7 @@ SITE_ID_TO_NAME = {
 
     # ─── Sitios de terceros ────────────────────────────────────────────────────
 
-    "KIO-QRO":        {"name": "KIO Networks Querétaro", "type": "third_party", "region": "Bajío",    "city": "Querétaro",       "lat": 20.6800, "lon": -100.4500},  # NW del clúster QRO
+    "KIO-QRO":        {"name": "KIO Querétaro",          "type": "third_party", "region": "Bajío",    "city": "Querétaro",       "lat": 20.6800, "lon": -100.4500},  # NW del clúster QRO
     "CIRION-ZURICH":  {"name": "Cirion Zurich",          "type": "third_party", "region": "Centro",   "city": "Ciudad de México","lat": 19.3800, "lon": -99.1800},  # S, separado de MSOMEX04
     "CIRION-MIRLO":   {"name": "Cirion Mirlo",           "type": "third_party", "region": "Occidente","city": "Guadalajara",     "lat": 20.6300, "lon": -103.5800},  # W del clúster GDL
     "CIRION-HUMBOLDT":{"name": "Cirion Humboldt",        "type": "third_party", "region": "Norte",    "city": "Monterrey",       "lat": 26.70, "lon": -101.60},  # cuadrícula MTY fila-1 col-W
@@ -545,11 +545,26 @@ def seed_isp_data():
     # Formato: provider, ingress (sitio donde conecta el ISP), egress (MSO donde está el PGW),
     #          pgw ("PGW1"/"PGW2"), gbps (Gbps reales), lambdas (CSV de nombres, o None)
     TRAFFIC_FLOWS = [
+        # ── Cd Juárez — Arelion (P3 en PGW1, P2 en PGW2 según prioridades) ──
+        {"provider": "Arelion", "ingress": "MSOJRZ01", "egress": "MSOMEX01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Cd Juarez to Megacentro"},
+        {"provider": "Arelion", "ingress": "MSOJRZ01", "egress": "MSOGDL01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Cd Juarez to Tlaquepaque"},
+        {"provider": "Arelion", "ingress": "MSOJRZ01", "egress": "MSOTOL01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Cd Juarez to Toluca"},
         # ── Apodaca (MSOMTY01) ───────────────────────────────────────────────
         {"provider": "Cirion",    "ingress": "CIRION-HUMBOLDT", "egress": "MSOMTY01", "pgw": "PGW1", "gbps": 30,
          "lambdas": "Cirion Humboldt to Apodaca Plano 1,Cirion Humboldt to Apodaca Plano 2"},
+        {"provider": "Gold Data", "ingress": "TAMREY1273",      "egress": "MSOMTY01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Reynosa to Apodaca"},
+        {"provider": "Gold Data", "ingress": "NFO-038",         "egress": "MSOMTY01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Laredo to Apodaca"},
         {"provider": "Gold Data", "ingress": "NFO-038",         "egress": "MSOMTY01", "pgw": "PGW2", "gbps": 30,
          "lambdas": "Laredo to Apodaca"},
+        {"provider": "Arelion",   "ingress": "MSOJRZ01",        "egress": "MSOMTY01", "pgw": "PGW2", "gbps": 0,
+         "lambdas": "Cd Juarez to Apodaca"},
+        {"provider": "Cirion",    "ingress": "CIRION-HUMBOLDT", "egress": "MSOMTY01", "pgw": "PGW2", "gbps": 0,
+         "lambdas": "Cirion Humboldt to Apodaca Plano 1"},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOMTY01", "pgw": "PGW1", "gbps": 2,
          "lambdas": "KIO Networks Qro to Megacentro Plano 1,Apodaca to Megacentro"},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOMTY01", "pgw": "PGW2", "gbps": 2,
@@ -565,8 +580,14 @@ def seed_isp_data():
         # ── Megacentro (MSOMEX01) ────────────────────────────────────────────
         {"provider": "Cirion",    "ingress": "CIRION-ZURICH",   "egress": "MSOMEX01", "pgw": "PGW1", "gbps": 30,
          "lambdas": "Cirion Zurich to Megacentro"},
+        {"provider": "Gold Data", "ingress": "NFO-038",         "egress": "MSOMEX01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Laredo to Megacentro"},
         {"provider": "Gold Data", "ingress": "NFO-038",         "egress": "MSOMEX01", "pgw": "PGW2", "gbps": 30,
          "lambdas": "Laredo to Megacentro"},
+        {"provider": "Gold Data", "ingress": "TAMREY1273",      "egress": "MSOMEX01", "pgw": "PGW2", "gbps": 0,
+         "lambdas": "Reynosa to Megacentro"},
+        {"provider": "Cirion",    "ingress": "CIRION-ZURICH",   "egress": "MSOMEX01", "pgw": "PGW2", "gbps": 0,
+         "lambdas": "Cirion Zurich to Megacentro"},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOMEX01", "pgw": "PGW1", "gbps": 2,
          "lambdas": "KIO Networks Qro to Megacentro Plano 1,KIO Networks Qro to Megacentro Plano 2"},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOMEX01", "pgw": "PGW2", "gbps": 2,
@@ -582,8 +603,14 @@ def seed_isp_data():
         # ── Toluca (MSOTOL01) ────────────────────────────────────────────────
         {"provider": "Cirion",    "ingress": "CIRION-ZURICH",   "egress": "MSOTOL01", "pgw": "PGW1", "gbps": 30,
          "lambdas": "Cirion Zurich to Toluca"},
+        {"provider": "Gold Data", "ingress": "NFO-038",         "egress": "MSOTOL01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Laredo to Toluca"},
         {"provider": "Gold Data", "ingress": "TAMREY1273",      "egress": "MSOTOL01", "pgw": "PGW2", "gbps": 30,
          "lambdas": "Reynosa to Toluca"},
+        {"provider": "Arelion",   "ingress": "MSOJRZ01",        "egress": "MSOTOL01", "pgw": "PGW2", "gbps": 0,
+         "lambdas": "Cd Juarez to Toluca"},
+        {"provider": "Cirion",    "ingress": "CIRION-ZURICH",   "egress": "MSOTOL01", "pgw": "PGW2", "gbps": 0,
+         "lambdas": "Cirion Zurich to Toluca"},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOTOL01", "pgw": "PGW1", "gbps": 2,
          "lambdas": "KIO Networks Qro to Megacentro Plano 1,Megacentro to Toluca"},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOTOL01", "pgw": "PGW2", "gbps": 2,
@@ -599,10 +626,14 @@ def seed_isp_data():
         # ── Tlaquepaque (MSOGDL01) ───────────────────────────────────────────
         {"provider": "Cirion",    "ingress": "CIRION-MIRLO",    "egress": "MSOGDL01", "pgw": "PGW1", "gbps": 30,
          "lambdas": "Cirion Mirlo to Tlaquepaque Plano 1"},
+        {"provider": "Gold Data", "ingress": "TAMREY1273",      "egress": "MSOGDL01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Reynosa to Tlaquepaque"},
         {"provider": "Cirion",    "ingress": "CIRION-MIRLO",    "egress": "MSOGDL01", "pgw": "PGW2", "gbps": 3,
          "lambdas": "Cirion Mirlo to Tlaquepaque Plano 1"},
         {"provider": "Gold Data", "ingress": "NFO-038",         "egress": "MSOGDL01", "pgw": "PGW2", "gbps": 30,
          "lambdas": "Laredo to Tlaquepaque"},
+        {"provider": "Arelion",   "ingress": "MSOJRZ01",        "egress": "MSOGDL01", "pgw": "PGW2", "gbps": 0,
+         "lambdas": "Cd Juarez to Tlaquepaque"},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOGDL01", "pgw": "PGW1", "gbps": 2,
          "lambdas": "KIO Networks Qro to Megacentro Plano 1,Megacentro to Toluca,Toluca to Tlaquepaque"},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOGDL01", "pgw": "PGW2", "gbps": 2,
@@ -619,8 +650,16 @@ def seed_isp_data():
         # Cirion conecta directamente en el sitio; sin lambda DWDM al MSO
         {"provider": "Cirion",    "ingress": "MSOMEX05",        "egress": "MSOMEX05", "pgw": "PGW1", "gbps": 30,
          "lambdas": None},
+        {"provider": "Arelion",   "ingress": "MSOJRZ01",        "egress": "MSOMEX05", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Cd Juarez to Megacentro"},
+        {"provider": "Gold Data", "ingress": "NFO-038",         "egress": "MSOMEX05", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Laredo to Megacentro"},
+        {"provider": "Cirion",    "ingress": "MSOMEX05",        "egress": "MSOMEX05", "pgw": "PGW2", "gbps": 0,
+         "lambdas": None},
         {"provider": "Gold Data", "ingress": "TAMREY1273",      "egress": "MSOMEX05", "pgw": "PGW2", "gbps": 30,
          "lambdas": None},
+        {"provider": "Gold Data", "ingress": "NFO-038",         "egress": "MSOMEX05", "pgw": "PGW2", "gbps": 0,
+         "lambdas": "Laredo to Megacentro"},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOMEX05", "pgw": "PGW1", "gbps": 2,
          "lambdas": None},
         {"provider": "Meta",      "ingress": "KIO-QRO",         "egress": "MSOMEX05", "pgw": "PGW2", "gbps": 2,
@@ -636,6 +675,14 @@ def seed_isp_data():
         # ── Merida (MSOMER01) ────────────────────────────────────────────────
         # Axtel conecta directamente en el sitio; sin lambda DWDM al MSO
         {"provider": "Axtel",     "ingress": "MSOMER01",        "egress": "MSOMER01", "pgw": "PGW1", "gbps": 30,
+         "lambdas": None},
+        {"provider": "Gold Data", "ingress": "NFO-038",         "egress": "MSOMER01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Laredo to Megacentro"},
+        {"provider": "Gold Data", "ingress": "TAMREY1273",      "egress": "MSOMER01", "pgw": "PGW1", "gbps": 0,
+         "lambdas": "Reynosa to Megacentro"},
+        {"provider": "Arelion",   "ingress": "MSOJRZ01",        "egress": "MSOMER01", "pgw": "PGW2", "gbps": 0,
+         "lambdas": "Cd Juarez to Megacentro"},
+        {"provider": "Axtel",     "ingress": "MSOMER01",        "egress": "MSOMER01", "pgw": "PGW2", "gbps": 0,
          "lambdas": None},
         {"provider": "Gold Data", "ingress": "TAMREY1273",      "egress": "MSOMER01", "pgw": "PGW2", "gbps": 30,
          "lambdas": None},

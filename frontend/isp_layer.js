@@ -44,9 +44,9 @@ export async function renderISPLayer(container) {
       <button class="isp-tab" data-tab="capacity">📦 Capacidad ISP</button>
       <button class="isp-tab" data-tab="traffic">📊 Tráfico / Uso</button>
       <button class="isp-tab" data-tab="priorities">🎯 Prioridades</button>
-      <button class="isp-tab" data-tab="metrics">📡 Métricas ISIS</button>
       <button class="isp-tab" data-tab="report">📋 Análisis Fallas</button>
       <button class="isp-tab" data-tab="validation">🔍 Validación Lambda</button>
+      <button class="isp-tab" data-tab="metrics">📡 Métricas ISIS</button>
     </div>
 
     <!-- Paneles de pestaña -->
@@ -80,14 +80,6 @@ export async function renderISPLayer(container) {
       <div id="isp-priority-content"><div class="isp-loading">Cargando…</div></div>
     </div>
 
-    <div class="isp-tab-panel" id="isp-panel-metrics">
-      <div class="isp-metrics-header">
-        <span>📡 Métricas ISIS</span>
-        <span class="isp-matrix-sub">Cisco &amp; Juniper · default 10 · rango 1–16 777 214</span>
-      </div>
-      <div id="isp-metrics-content"><div class="isp-loading">Cargando…</div></div>
-    </div>
-
     <div class="isp-tab-panel" id="isp-panel-report">
       <div class="isp-matrix-header">
         <span>📋 Análisis de Fallas</span>
@@ -110,6 +102,14 @@ export async function renderISPLayer(container) {
         <button class="btn-tool" id="isp-val-revalidate" title="Recargar datos y revalidar conectividad">🔄 Revalidar</button>
       </div>
       <div id="isp-validation-content"><div class="isp-loading">Cargando…</div></div>
+    </div>
+
+    <div class="isp-tab-panel" id="isp-panel-metrics">
+      <div class="isp-metrics-header">
+        <span>📡 Métricas ISIS</span>
+        <span class="isp-matrix-sub">Cisco &amp; Juniper · default 10 · rango 1–16 777 214</span>
+      </div>
+      <div id="isp-metrics-content"><div class="isp-loading">Cargando…</div></div>
     </div>
   </div>`;
 
@@ -567,38 +567,76 @@ function _lambdaEndpoints(lm) {
   return { ingress: endpoints[0], egress: endpoints[1] };
 }
 
-// ── Matriz de tráfico (con columna PGW y Gbps reales) ────────────────────────
+// ── Matriz de tráfico: filas = (sitio MSO egreso, PGW) · columnas = proveedor/sitio ingreso ──
 function renderMatrix() {
   const content = document.getElementById("isp-matrix-content");
   if (!content) return;
 
-  // Columnas = egress_sites ordenados
+  // Orden fijo de egress sites
+  const EGRESS_ORDER = ["MSOGDL01", "MSOMER01", "MSOMEX01", "MSOMEX05", "MSOMTY01", "MSOTOL01"];
   const egressNames = {};
-  const egresSet = new Set();
-  flows.forEach(f => { egresSet.add(f.egress_site_id); egressNames[f.egress_site_id] = f.egress_site_name; });
-  const egressSites = [...egresSet].sort();
+  flows.forEach(f => { egressNames[f.egress_site_id] = f.egress_site_name; });
 
-  // Filas = (provider_id, ingress_site_id, pgw) agrupados
-  const rowMap = {};
-  const rows = [];
+  // Recopilar PGWs por egress site (orden alfabético)
+  const pgwsByEgress = {};
   flows.forEach(f => {
-    const key = `${f.isp_provider_id}_${f.ingress_site_id}_${f.pgw || ""}`;
-    if (!rowMap[key]) {
-      rowMap[key] = {
+    if (!pgwsByEgress[f.egress_site_id]) pgwsByEgress[f.egress_site_id] = new Set();
+    pgwsByEgress[f.egress_site_id].add(f.pgw || "—");
+  });
+
+  // Lista de sub-filas: (egressId, pgw, isFirst, pgwCount)
+  const rows = [];
+  EGRESS_ORDER.filter(id => egressNames[id]).forEach(egressId => {
+    const pgws = [...(pgwsByEgress[egressId] || new Set(["—"]))].sort();
+    pgws.forEach((pgw, idx) => rows.push({ egressId, pgw, isFirst: idx === 0, pgwCount: pgws.length }));
+  });
+
+  // Columnas = (provider_id, ingress_site_id) únicos
+  const colMap = {};
+  const cols = [];
+  flows.forEach(f => {
+    const key = `${f.isp_provider_id}_${f.ingress_site_id}`;
+    if (!colMap[key]) {
+      colMap[key] = {
         key,
         providerName:    f.isp_provider_name,
         providerColor:   f.isp_provider_color,
         ingressSiteId:   f.ingress_site_id,
         ingressSiteName: f.ingress_site_name,
-        pgw:             f.pgw,
-        egressMap:       {},
+        provId:          f.isp_provider_id,
       };
-      rows.push(rowMap[key]);
+      cols.push(colMap[key]);
     }
-    rowMap[key].egressMap[f.egress_site_id] = f;
   });
 
-  // Capacidad ISP por (provider, ingress_site) en Gbps
+  // Orden de columnas definido por el usuario
+  const COLUMN_ORDER = [
+    "Arelion_MSOJRZ01",
+    "Gold Data_NFO-038",
+    "Gold Data_TAMREY1273",
+    "Cirion_CIRION-ZURICH",
+    "Cirion_CIRION-MIRLO",
+    "Cirion_CIRION-HUMBOLDT",
+    "Axtel_MSOMER01",
+    "Cirion_MSOMEX05",
+    "Meta_KIO-QRO",
+    "Amazon_KIO-QRO",
+    "Akamai_KIO-QRO",
+  ];
+  cols.sort((a, b) => {
+    const ia = COLUMN_ORDER.indexOf(`${a.providerName}_${a.ingressSiteId}`);
+    const ib = COLUMN_ORDER.indexOf(`${b.providerName}_${b.ingressSiteId}`);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+
+  // Lookup exacto: (provider_id, ingress_site_id, egress_site_id, pgw) → flow
+  const flowLookup = {};
+  flows.forEach(f => {
+    const key = `${f.isp_provider_id}_${f.ingress_site_id}_${f.egress_site_id}_${f.pgw || "—"}`;
+    flowLookup[key] = f;
+  });
+
+  // Capacidad ISP por (provider_id, ingress_site_id) en Gbps
   const ispCapacity = {};
   routers.forEach(r => {
     r.interfaces.filter(i => i.iface_type === "isp").forEach(iface => {
@@ -611,65 +649,77 @@ function renderMatrix() {
     return pct >= 80 ? "sem-red" : pct >= 60 ? "sem-yellow" : "sem-green";
   }
 
+
+  // Cabecera: sitio egreso | PGW | col por proveedor/sitio_ingreso | total
   let html = `<div class="isp-matrix-scroll"><table class="isp-matrix-table">
   <thead><tr>
-    <th class="isp-matrix-th">Proveedor / Sitio</th>
+    <th class="isp-matrix-th">Sitio MSO (Egreso)</th>
     <th class="isp-matrix-th">PGW</th>
-    ${egressSites.map(s => `<th class="isp-matrix-th isp-matrix-th--egress">${egressNames[s] || s}</th>`).join("")}
-    <th class="isp-matrix-th">Total Gbps</th>
-    <th class="isp-matrix-th">% Cap.</th>
+    ${cols.map(col => {
+      const capGbps = ispCapacity[`${col.provId}_${col.ingressSiteId}`] || 0;
+      return `<th class="isp-matrix-th isp-matrix-th--egress" style="min-width:110px;text-align:center">
+        <span class="isp-provider-dot" style="background:${col.providerColor}"></span>
+        <span style="font-weight:700">${col.providerName}</span><br>
+        <span style="font-weight:400;opacity:.75;font-size:10px">${col.ingressSiteName}</span>
+        ${capGbps ? `<br><span style="font-size:9px;opacity:.45">${capGbps}G cap</span>` : ""}
+      </th>`;
+    }).join("")}
   </tr></thead><tbody>`;
 
-  rows.forEach(row => {
-    const provId  = providers.find(p => p.name === row.providerName)?.id ?? "";
-    const capGbps = ispCapacity[`${provId}_${row.ingressSiteId}`] || 0;
-    const rowGbps = egressSites.reduce((s, e) => s + (row.egressMap[e]?.traffic_gbps || 0), 0);
-    const pct     = capGbps > 0 ? Math.round((rowGbps / capGbps) * 100) : 0;
-    const sem     = semClass(pct);
+  const colTotals = {};
 
-    html += `<tr>
-      <td class="isp-matrix-td isp-matrix-td--label">
-        <span class="isp-provider-dot" style="background:${row.providerColor}"></span>
-        <span class="isp-matrix-provider">${row.providerName}</span>
-        <span class="isp-matrix-site">${row.ingressSiteName}</span>
-      </td>
-      <td class="isp-matrix-td" style="font-size:10px;font-weight:600;opacity:.8">${row.pgw || "—"}</td>
-      ${egressSites.map(e => {
-        const f = row.egressMap[e];
-        if (!f) return `<td class="isp-matrix-td isp-matrix-td--cell"><span class="isp-matrix-na">—</span></td>`;
-        const gbps    = f.traffic_gbps;
-        const cellPct = capGbps > 0 ? Math.round((gbps / capGbps) * 100) : 0;
-        return `<td class="isp-matrix-td isp-matrix-td--cell ${semClass(cellPct)}">
-          <input class="isp-matrix-input" type="number" min="0" step="1" max="${capGbps || 9600}"
-            value="${gbps}" data-flow-id="${f.id}" data-cap="${capGbps}"
-            title="${f.lambda_names ? "Lambdas: " + f.lambda_names : ""}">
-        </td>`;
-      }).join("")}
-      <td class="isp-matrix-td isp-matrix-td--total ${sem}">${rowGbps} Gbps</td>
-      <td class="isp-matrix-td isp-matrix-td--cap ${sem}">
-        ${capGbps > 0 ? `<span class="isp-matrix-pct">${pct}%</span><span style="font-size:10px;display:block">${rowGbps}/${capGbps}G</span>` : "—"}
-      </td>
+  rows.forEach(row => {
+    let rowTotal = 0;
+
+    const cells = cols.map(col => {
+      const f       = flowLookup[`${col.provId}_${col.ingressSiteId}_${row.egressId}_${row.pgw}`];
+      if (!f) return `<td class="isp-matrix-td isp-matrix-td--cell"><span class="isp-matrix-na">—</span></td>`;
+
+      const gbps    = f.traffic_gbps || 0;
+      rowTotal     += gbps;
+      colTotals[col.key] = (colTotals[col.key] || 0) + gbps;
+
+      const capGbps = ispCapacity[`${col.provId}_${col.ingressSiteId}`] || 0;
+      const cellPct = capGbps > 0 ? Math.round((gbps / capGbps) * 100) : 0;
+      const tip     = f.lambda_names ? `Lambdas: ${f.lambda_names}` : "";
+      return `<td class="isp-matrix-td isp-matrix-td--cell ${semClass(cellPct)}">
+        <input class="isp-matrix-input" type="number" min="0" step="1" max="${capGbps || 9600}"
+          value="${gbps}" data-flow-id="${f.id}" data-cap="${capGbps}" title="${tip}">
+      </td>`;
+    });
+
+    // Celda del sitio: solo en la primera sub-fila, con rowspan
+    const siteCell = row.isFirst
+      ? `<td class="isp-matrix-td isp-matrix-td--site" rowspan="${row.pgwCount}">${egressNames[row.egressId] || row.egressId}</td>`
+      : "";
+
+    html += `<tr class="${row.isFirst ? "isp-matrix-site-first" : "isp-matrix-pgw-row"}">
+      ${siteCell}
+      <td class="isp-matrix-td isp-matrix-td--pgw">${row.pgw}</td>
+      ${cells.join("")}
     </tr>`;
   });
 
-  // Totales por egress
-  const colTotals = {};
-  egressSites.forEach(e => {
-    colTotals[e] = flows.filter(f => f.egress_site_id === e).reduce((s, f) => s + (f.traffic_gbps || 0), 0);
-  });
-  const grandTotal = Object.values(colTotals).reduce((a, b) => a + b, 0);
+  // Fila de totales: cada columna muestra Gbps + % de capacidad del enlace
+
   html += `<tr class="isp-matrix-totals">
-    <td class="isp-matrix-td isp-matrix-td--label" colspan="2"><b>Total ↓</b></td>
-    ${egressSites.map(e => `<td class="isp-matrix-td isp-matrix-td--total"><b>${colTotals[e]}G</b></td>`).join("")}
-    <td class="isp-matrix-td isp-matrix-td--total"><b>${grandTotal} Gbps</b></td>
-    <td class="isp-matrix-td isp-matrix-td--cap"></td>
+    <td class="isp-matrix-td" colspan="2"><b>Total ↓</b></td>
+    ${cols.map(col => {
+      const colGbps = colTotals[col.key] || 0;
+      const colCap  = ispCapacity[`${col.provId}_${col.ingressSiteId}`] || 0;
+      const colPct  = colCap > 0 ? Math.round((colGbps / colCap) * 100) : 0;
+      return `<td class="isp-matrix-td isp-matrix-td--total ${colCap ? semClass(colPct) : ""}">
+        <b>${colGbps}G</b>
+        ${colCap ? `<span class="isp-matrix-pct-tag ${semClass(colPct)}">${colPct}%</span>` : ""}
+      </td>`;
+    }).join("")}
   </tr>`;
 
   html += `</tbody></table></div>
   <div class="isp-matrix-note">Valores en Gbps · Editable directamente · Hover → lambdas de transporte.</div>`;
   content.innerHTML = html;
 
-  // Edición inline: guardar traffic_gbps directamente
+  // Edición inline
   content.querySelectorAll(".isp-matrix-input").forEach(input => {
     input.addEventListener("change", async (e) => {
       const flowId  = +e.target.dataset.flowId;
@@ -926,63 +976,170 @@ function renderPriorityMatrix() {
     return;
   }
 
-  // Colores de badge por nivel
-  const LEVEL_COLOR = { 1: "#10B981", 2: "#EAB308", 3: "#F97316" };
-  const LEVEL_LABEL = { 1: "1°", 2: "2°", 3: "3°" };
+  const EGRESS_ORDER = ["MSOGDL01", "MSOMER01", "MSOMEX01", "MSOMEX05", "MSOMTY01", "MSOTOL01"];
+  const LEVEL_COLOR  = { 1: "#10B981", 2: "#EAB308", 3: "#F97316" };
+  const LEVEL_TIP    = {
+    1: "Primario: recibe tráfico mientras haya lambda activa, ruteador y proveedor ISP sin falla.",
+    2: "Secundario: activo cuando el proveedor 1 tiene falla de lambda, ruteador o ISP.",
+    3: "Terciario: activo cuando los proveedores 1 y 2 tienen falla simultánea.",
+  };
 
-  // Agrupar por (egress_site_id, pgw)
+  // Proveedores seleccionables: universales (no KIO-QRO, no exclusivos de Mérida)
+  // Orden fijo: misma secuencia que COLUMN_ORDER en renderMatrix
+  const PROV_ORDER = [
+    "Arelion_MSOJRZ01", "Gold Data_NFO-038", "Gold Data_TAMREY1273",
+    "Cirion_CIRION-ZURICH", "Cirion_CIRION-MIRLO", "Cirion_CIRION-HUMBOLDT",
+  ];
+  // Proveedores exclusivos por sitio egreso (no disponibles en otros sitios)
+  const SITE_SPECIFIC_PROVIDERS = {
+    "MSOMER01": ["Axtel_MSOMER01"],
+    "MSOMEX05": ["Cirion_MSOMEX05"],
+  };
+  const provCatalog = {};
+  flows.forEach(f => {
+    const key = `${f.isp_provider_name}_${f.ingress_site_id}`;
+    if (!provCatalog[key]) {
+      provCatalog[key] = {
+        isp_provider_id:   f.isp_provider_id,
+        ingress_site_id:   f.ingress_site_id,
+        isp_provider_name: f.isp_provider_name,
+        ingress_site_name: f.ingress_site_name,
+        color:             f.isp_provider_color,
+      };
+    }
+  });
+
+  function getAvailableProviders(egressSiteId) {
+    const result = [];
+    PROV_ORDER.forEach(k => { if (provCatalog[k]) result.push(provCatalog[k]); });
+    (SITE_SPECIFIC_PROVIDERS[egressSiteId] || []).forEach(k => {
+      if (provCatalog[k]) result.push(provCatalog[k]);
+    });
+    return result;
+  }
+
+  // Agrupar prioridades por (egress, pgw), con byLevel para acceso rápido
   const groups = {};
   priorities.forEach(p => {
     const key = `${p.egress_site_id}|${p.pgw}`;
-    if (!groups[key]) groups[key] = { egress: p.egress_site_id, egressName: p.egress_site_name, pgw: p.pgw, items: [] };
-    groups[key].items.push(p);
+    if (!groups[key]) groups[key] = {
+      egress: p.egress_site_id, egressName: p.egress_site_name, pgw: p.pgw,
+      byLevel: {}, byProvKey: {},
+    };
+    groups[key].byLevel[p.priority_level] = p;
+    groups[key].byProvKey[`${p.isp_provider_id}_${p.ingress_site_id}`] = p;
   });
-  Object.values(groups).forEach(g => g.items.sort((a, b) => a.priority_level - b.priority_level));
 
-  let html = `<div class="isp-matrix-scroll"><table class="isp-matrix-table">
+  // Ordenar filas según EGRESS_ORDER × PGW
+  const sortedGroups = [];
+  EGRESS_ORDER.forEach(egId => {
+    ["PGW1", "PGW2"].forEach(pgw => {
+      const g = groups[`${egId}|${pgw}`];
+      if (g) sortedGroups.push(g);
+    });
+  });
+
+  // Encabezado de tabla
+  let html = `
+  <div style="padding:10px 12px 6px;font-size:11px;color:var(--text-muted);line-height:1.5;border-bottom:1px solid var(--border);margin-bottom:4px">
+    <b style="color:var(--text-secondary)">Reglas de prioridad:</b>
+    <span style="margin-left:6px">
+      <span style="color:#10B981">●</span> <b>P1</b> Primario — activo sin fallas ·
+      <span style="color:#EAB308">●</span> <b>P2</b> Secundario — falla en P1 ·
+      <span style="color:#F97316">●</span> <b>P3</b> Terciario — falla en P1 y P2
+    </span>
+    <span style="margin-left:12px;opacity:.7">Meta / Amazon / Akamai / KIO Querétaro: su tráfico se suma al proveedor activo durante simulaciones.</span>
+  </div>
+  <div class="isp-matrix-scroll"><table class="isp-matrix-table">
   <thead><tr>
-    <th class="isp-matrix-th">Sitio MSO</th>
+    <th class="isp-matrix-th">Sitio MSO (Egreso)</th>
     <th class="isp-matrix-th">PGW</th>
-    <th class="isp-matrix-th" style="text-align:left">Prioridades (1=Primario)</th>
+    <th class="isp-matrix-th" title="${LEVEL_TIP[1]}" style="color:#10B981;cursor:help">P1 — Primario</th>
+    <th class="isp-matrix-th" title="${LEVEL_TIP[2]}" style="color:#EAB308;cursor:help">P2 — Secundario</th>
+    <th class="isp-matrix-th" title="${LEVEL_TIP[3]}" style="color:#F97316;cursor:help">P3 — Terciario</th>
   </tr></thead><tbody>`;
 
-  Object.values(groups).sort((a, b) => a.egress.localeCompare(b.egress) || a.pgw.localeCompare(b.pgw)).forEach(g => {
-    const badgesHtml = g.items.map((p, idx) => {
-      const color = LEVEL_COLOR[p.priority_level] || "#888";
-      const label = LEVEL_LABEL[p.priority_level] || p.priority_level;
-      const canUp   = idx > 0;
-      const canDown = idx < g.items.length - 1;
-      return `<span class="isp-priority-entry" style="display:inline-flex;align-items:center;gap:3px;margin-right:6px;margin-bottom:4px">
-        ${canUp ? `<button class="isp-prio-btn" data-a="${p.id}" data-b="${g.items[idx-1].id}" title="Subir prioridad">▲</button>` : ""}
-        <span class="isp-prio-badge" style="background:${color}">${label} ${p.isp_provider_name}</span>
-        <span style="font-size:9px;color:var(--text-muted)">${p.ingress_site_id}</span>
-        ${canDown ? `<button class="isp-prio-btn" data-a="${p.id}" data-b="${g.items[idx+1].id}" title="Bajar prioridad">▼</button>` : ""}
-      </span>`;
+  // Agrupar por egress para rowspan
+  const egressGroups = {};
+  sortedGroups.forEach(g => {
+    if (!egressGroups[g.egress]) egressGroups[g.egress] = [];
+    egressGroups[g.egress].push(g);
+  });
+
+  sortedGroups.forEach((g, rowIdx) => {
+    const avail = getAvailableProviders(g.egress);
+    const isFirstPgw = rowIdx === 0 || sortedGroups[rowIdx - 1].egress !== g.egress;
+    const pgwCount = egressGroups[g.egress]?.length || 1;
+
+    const siteCell = isFirstPgw
+      ? `<td class="isp-matrix-td isp-matrix-td--site" rowspan="${pgwCount}">${g.egressName || g.egress}</td>`
+      : "";
+
+    const levelCells = [1, 2, 3].map(level => {
+      const rec = g.byLevel[level];
+      const currentVal = rec ? `${rec.isp_provider_id}_${rec.ingress_site_id}` : "";
+      const color = LEVEL_COLOR[level];
+      const opts = avail.map(p => {
+        const val = `${p.isp_provider_id}_${p.ingress_site_id}`;
+        const sel = val === currentVal ? " selected" : "";
+        return `<option value="${val}"${sel}>${p.isp_provider_name} — ${p.ingress_site_name}</option>`;
+      }).join("");
+      return `<td class="isp-matrix-td isp-matrix-td--cell" style="min-width:200px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="isp-prio-level-dot" style="background:${color}"></span>
+          <select class="isp-prio-select"
+            data-egress="${g.egress}" data-pgw="${g.pgw}" data-level="${level}"
+            data-rec-id="${rec?.id ?? ""}">
+            ${opts}
+          </select>
+        </div>
+      </td>`;
     }).join("");
 
-    html += `<tr>
-      <td class="isp-matrix-td" style="white-space:nowrap"><b>${g.egressName || g.egress}</b></td>
-      <td class="isp-matrix-td" style="font-size:11px;font-weight:600">${g.pgw}</td>
-      <td class="isp-matrix-td" style="text-align:left">${badgesHtml}</td>
+    html += `<tr class="${isFirstPgw ? "isp-matrix-site-first" : "isp-matrix-pgw-row"}">
+      ${siteCell}
+      <td class="isp-matrix-td isp-matrix-td--pgw">${g.pgw}</td>
+      ${levelCells}
     </tr>`;
   });
 
   html += `</tbody></table></div>
-  <div class="isp-matrix-note">▲/▼ intercambia la prioridad entre dos proveedores consecutivos.</div>`;
+  <div class="isp-matrix-note">Selecciona el proveedor activo en cada nivel de prioridad. Meta / Amazon / Akamai suman su tráfico al proveedor activo.</div>`;
   content.innerHTML = html;
 
-  // Eventos de swap
-  content.querySelectorAll(".isp-prio-btn").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const idA = +btn.dataset.a;
-      const idB = +btn.dataset.b;
+  // Eventos de cambio en selects
+  content.querySelectorAll(".isp-prio-select").forEach(sel => {
+    sel.addEventListener("change", async (e) => {
+      const egressId  = e.target.dataset.egress;
+      const pgw       = e.target.dataset.pgw;
+      const recId     = +e.target.dataset.recId;
+      const [newProvId, newIngress] = e.target.value.split("_");
+      const groupKey  = `${egressId}|${pgw}`;
+      const g         = groups[groupKey];
+      if (!g || !recId) return;
+
+      e.target.disabled = true;
       try {
-        await API.reorderISPPriorities({ id_a: idA, id_b: idB });
+        // ¿El proveedor seleccionado ya existe en otro nivel del mismo grupo?
+        const provKey   = `${newProvId}_${newIngress}`;
+        const conflict  = g.byProvKey[provKey];
+
+        if (conflict && conflict.id !== recId) {
+          // Swap de niveles entre el registro actual y el conflictivo
+          await API.reorderISPPriorities({ id_a: recId, id_b: conflict.id });
+        } else if (!conflict) {
+          // Proveedor nuevo en el grupo: reemplazar provider del registro actual
+          await API.updateISPPriority(recId, {
+            isp_provider_id: +newProvId,
+            ingress_site_id: newIngress,
+          });
+        }
+        // Si conflict.id === recId: misma selección, no-op
         priorities = await API.getISPPriorities();
         renderPriorityMatrix();
       } catch {
-        btn.style.color = "var(--accent-red)";
-        setTimeout(() => btn.style.color = "", 1500);
+        e.target.style.borderColor = "var(--accent-red)";
+        setTimeout(() => { e.target.style.borderColor = ""; e.target.disabled = false; }, 2000);
       }
     });
   });
@@ -1003,7 +1160,7 @@ async function renderSimulationReport() {
     const data = await API.getSimulationReport();
     let html = "";
 
-    // ── Sección 1: Adecuación de prioridades ─────────────────────────────────
+    // ── Sección 1: Adecuación de prioridades (por proveedor P1 que falla) ───────
     html += `<details open><summary class="isp-report-section">
       🎯 Adecuación de Prioridades ISP
       <span class="isp-report-badge ${data.priority_adequacy.every(r => r.adequate) ? "badge-ok" : "badge-warn"}">
@@ -1012,21 +1169,33 @@ async function renderSimulationReport() {
     </summary>
     <div class="isp-matrix-scroll"><table class="isp-matrix-table">
       <thead><tr>
-        <th class="isp-matrix-th">Sitio</th>
-        <th class="isp-matrix-th">PGW</th>
-        <th class="isp-matrix-th">Primario</th>
-        <th class="isp-matrix-th">Tráfico</th>
-        <th class="isp-matrix-th">Cap. Fallback</th>
+        <th class="isp-matrix-th">Si falla…</th>
+        <th class="isp-matrix-th">Sitios afectados</th>
+        <th class="isp-matrix-th">Tráfico total</th>
+        <th class="isp-matrix-th">Cap. Fallback real</th>
         <th class="isp-matrix-th">Estado</th>
       </tr></thead><tbody>`;
 
     data.priority_adequacy.forEach(r => {
+      const sitesHtml = r.affected_sites.map(s =>
+        `<div style="font-size:10px;white-space:nowrap">${s.egress_site_name} ${s.pgw}: ${s.traffic_gbps} Gbps</div>`
+      ).join("");
+      const fbHtml = r.fallback_details.map(f =>
+        `<div style="font-size:10px;white-space:nowrap">P${f.priority_level} ${f.provider} / ${f.ingress_site_name}: ${f.available_gbps} Gbps libre (${f.used_gbps}/${f.capacity_gbps} usado)</div>`
+      ).join("");
       html += `<tr>
-        <td class="isp-matrix-td">${r.egress_site_name || r.egress_site_id}</td>
-        <td class="isp-matrix-td">${r.pgw}</td>
-        <td class="isp-matrix-td">${r.primary_provider || "—"}</td>
-        <td class="isp-matrix-td">${r.primary_gbps} Gbps</td>
-        <td class="isp-matrix-td">${r.fallback_capacity_gbps} Gbps</td>
+        <td class="isp-matrix-td">
+          <span class="isp-provider-dot" style="background:${r.primary_color}"></span>
+          <strong>${r.primary_provider}</strong><br>
+          <span style="font-size:10px;color:var(--text-muted)">${r.primary_ingress_site}</span>
+        </td>
+        <td class="isp-matrix-td" style="min-width:160px">${sitesHtml}</td>
+        <td class="isp-matrix-td"><strong>${r.total_gbps} Gbps</strong></td>
+        <td class="isp-matrix-td" style="min-width:220px">${fbHtml}
+          <div style="font-size:11px;font-weight:600;margin-top:2px;border-top:1px solid var(--border);padding-top:2px">
+            Total: ${r.fallback_capacity_gbps} Gbps
+          </div>
+        </td>
         <td class="isp-matrix-td ${r.adequate ? "sem-green" : "sem-red"}">${r.adequate ? "✅ OK" : "⚠ Déficit"}</td>
       </tr>`;
     });
@@ -1056,6 +1225,7 @@ async function renderSimulationReport() {
       <thead><tr>
         <th class="isp-matrix-th">#</th>
         <th class="isp-matrix-th">Proveedor</th>
+        <th class="isp-matrix-th">Sitio de Ingreso</th>
         <th class="isp-matrix-th">Flujos</th>
         <th class="isp-matrix-th">Tráfico Total</th>
       </tr></thead><tbody>`;
@@ -1066,6 +1236,7 @@ async function renderSimulationReport() {
         <td class="isp-matrix-td">
           <span class="isp-provider-dot" style="background:${r.color}"></span>${r.provider}
         </td>
+        <td class="isp-matrix-td" style="font-size:11px;color:var(--text-muted)">${r.ingress_site_name || r.ingress_site_id}</td>
         <td class="isp-matrix-td">${r.flows}</td>
         <td class="isp-matrix-td ${r.traffic_gbps >= 60 ? "sem-red" : r.traffic_gbps >= 30 ? "sem-yellow" : "sem-green"}">${r.traffic_gbps} Gbps</td>
       </tr>`;
@@ -1081,15 +1252,16 @@ async function renderSimulationReport() {
 
     // Export CSV
     document.getElementById("isp-export-csv")?.addEventListener("click", () => {
-      const lines = ["Sección,Sitio/Lambda/Proveedor,PGW,Tráfico (Gbps),Estado"];
+      const lines = ["Sección,Proveedor P1,Sitios afectados,Tráfico total (Gbps),Cap. Fallback (Gbps),Estado"];
       data.priority_adequacy.forEach(r => {
-        lines.push(`Prioridades,${r.egress_site_name || r.egress_site_id},${r.pgw},${r.primary_gbps},${r.adequate ? "OK" : "Déficit"}`);
+        const sites = r.affected_sites.map(s => `${s.egress_site_name} ${s.pgw}`).join("; ");
+        lines.push(`Prioridades,"${r.primary_provider} - ${r.primary_ingress_site}","${sites}",${r.total_gbps},${r.fallback_capacity_gbps},${r.adequate ? "OK" : "Déficit"}`);
       });
       data.lambda_ranking.forEach((r, i) => {
         lines.push(`Lambdas,${r.lambda_name},,${r.traffic_at_risk_gbps},Posición ${i + 1}`);
       });
       data.provider_ranking.forEach((r, i) => {
-        lines.push(`Proveedores,${r.provider},,${r.traffic_gbps},Posición ${i + 1}`);
+        lines.push(`Proveedores,${r.provider} - ${r.ingress_site_name || r.ingress_site_id},,${r.traffic_gbps},Posición ${i + 1}`);
       });
       const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
       const a = document.createElement("a");

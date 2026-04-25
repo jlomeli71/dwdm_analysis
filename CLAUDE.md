@@ -282,7 +282,7 @@ SITE_ID_TO_NAME = {
     # ─── Sitios de terceros ────────────────────────────────────────────────────
 
     "KIO-QRO": {
-        "name": "KIO Networks Querétaro",
+        "name": "KIO Querétaro",
         "type": "third_party",
         "region": "Bajío",
         "city": "Querétaro",

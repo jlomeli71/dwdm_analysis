@@ -478,27 +478,35 @@ function renderISPResults(result) {
     </div>
     ` : ''}
 
-    <!-- Redistribución proporcional ISIS -->
+    <!-- Redistribución por Prioridades ISP -->
     ${(result.redistribution_detail || []).length > 0 ? `
     <div class="card" style="margin-bottom:16px;border-color:rgba(0,212,255,0.2)">
       <div class="card-title" style="color:var(--accent-cyan)">
-        🔄 Redistribución proporcional
-        <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:8px">— IGP ISIS · métrica uniforme entre proveedores ISP</span>
+        🔄 Redistribución por Prioridades ISP
+        <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:8px">— según tabla de prioridades BGP configurada</span>
       </div>
       <div class="table-wrapper">
         <table>
           <thead><tr>
-            <th>Proveedor activo</th><th>Interfaces disp.</th><th>Tráfico absorbido</th><th>% saturación</th>
+            <th>Nivel</th><th>PGW</th><th>Proveedor fallback</th><th>Sitio ingreso</th>
+            <th>Cap. total</th><th>En uso</th><th>Disponible</th><th>Absorbe</th><th>Saturación</th>
           </tr></thead>
           <tbody>
             ${result.redistribution_detail.map(r => {
-              const pct = r.capacity_gbps > 0 ? Math.round((r.absorbed_gbps / r.capacity_gbps) * 100) : 0;
+              const newUsed = r.used_gbps + r.absorbed_gbps;
+              const pct = r.capacity_gbps > 0 ? Math.round((newUsed / r.capacity_gbps) * 100) : 0;
               const color = pct >= 80 ? 'var(--accent-red)' : pct >= 60 ? 'var(--accent-yellow)' : 'var(--accent-green)';
-              return `
-              <tr>
-                <td>${r.provider}</td>
-                <td>${r.interfaces}</td>
-                <td>${r.absorbed_gbps} Gbps</td>
+              return `<tr>
+                <td style="text-align:center;font-weight:700;color:var(--accent-cyan)">P${r.priority_level}</td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">${r.pgw || ''}</td>
+                <td>
+                  <span class="isp-provider-dot" style="background:${r.color}"></span>${r.provider}
+                </td>
+                <td style="font-size:11px;color:var(--text-muted)">${r.ingress_site_name || r.ingress_site_id}</td>
+                <td>${r.capacity_gbps} Gbps</td>
+                <td>${r.used_gbps} Gbps</td>
+                <td style="color:var(--accent-green)">${r.available_gbps} Gbps</td>
+                <td style="font-weight:600">${r.absorbed_gbps} Gbps</td>
                 <td style="color:${color};font-weight:600">${pct}%</td>
               </tr>`;
             }).join('')}
@@ -510,19 +518,17 @@ function renderISPResults(result) {
 
     ${result.deficit_gbps > 0 ? `
     <div class="card" style="margin-bottom:16px;border-color:rgba(255,107,107,0.5);background:rgba(255,107,107,0.05)">
-      <div class="card-title" style="color:var(--accent-red)">⚠️ Saturación — Sin capacidad local suficiente</div>
+      <div class="card-title" style="color:var(--accent-red)">⚠️ Saturación — Sin capacidad suficiente en proveedores de fallback</div>
       <p style="font-size:13px;margin:0;color:var(--text-secondary)">
-        <b>${result.deficit_gbps} Gbps</b> no pueden redistribuirse localmente. Los proveedores restantes en
-        <b>${result.site_id}</b> no tienen interfaces suficientes para absorber todo el tráfico de
-        <b>${result.provider}</b>.
+        <b>${result.deficit_gbps} Gbps</b> no pueden redistribuirse entre los proveedores de fallback configurados en la tabla de prioridades.
       </p>
     </div>
 
-    <!-- Rerouteo ISIS por lambdas -->
+    <!-- Rerouteo ISIS por lambdas (caso déficit) -->
     ${(result.isis_rerouting || []).length > 0 ? `
-    <div class="card" style="border-color:rgba(139,92,246,0.35)">
+    <div class="card" style="margin-bottom:16px;border-color:rgba(139,92,246,0.35)">
       <div class="card-title" style="color:#a78bfa">
-        📡 Rerouteo ISIS — rutas alternativas por lambda
+        📡 Rerouteo ISIS — rutas alternativas para el tráfico deficitario
         <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:8px">— menor métrica = camino preferido</span>
       </div>
       <div class="table-wrapper">
@@ -551,26 +557,65 @@ function renderISPResults(result) {
       </div>
       <div style="font-size:11px;color:var(--text-muted);margin-top:10px;padding:0 2px">
         ISIS converge automáticamente y encamina el tráfico hacia el vecino de menor métrica que disponga de capacidad ISP.
-        Si ningún vecino tiene capacidad, el tráfico queda sin ruta hasta que algún proveedor se restaure.
       </div>
     </div>
     ` : `
-    <div class="card" style="border-color:rgba(255,107,107,0.3);background:rgba(255,107,107,0.04)">
+    <div class="card" style="margin-bottom:16px;border-color:rgba(255,107,107,0.3);background:rgba(255,107,107,0.04)">
       <div class="card-title" style="color:var(--accent-red)">📡 Sin rutas ISIS disponibles</div>
       <p style="font-size:13px;margin:0;color:var(--text-secondary)">
-        No se encontraron interfaces lambda con métrica ISIS en este ruteador para encaminar el tráfico deficitario.
+        No se encontraron interfaces lambda con métrica ISIS para encaminar el tráfico deficitario.
       </p>
     </div>
     `}
-    ` : `
-    <div class="card" style="border-color:rgba(0,255,128,0.3);background:rgba(0,255,128,0.04)">
-      <div class="card-title" style="color:var(--accent-green)">✅ Redistribución completa (sin rerouteo ISIS)</div>
+    ` : (result.isis_reconvergence || []).length === 0 ? `
+    <div class="card" style="margin-bottom:16px;border-color:rgba(0,255,128,0.3);background:rgba(0,255,128,0.04)">
+      <div class="card-title" style="color:var(--accent-green)">✅ Redistribución local — ISIS no necesita reconverger</div>
       <p style="font-size:13px;margin:0;color:var(--text-secondary)">
-        Todo el tráfico de <b>${result.provider}</b> en el sitio <b>${result.site_id}</b>
-        puede redistribuirse localmente entre los proveedores ISP restantes. ISIS no necesita reconverger.
+        Todo el tráfico de <b>${result.provider}</b> se redistribuye entre proveedores del mismo sitio de ingreso.
+        No hay cambio en el flujo de tráfico por el backbone.
       </p>
     </div>
-    `}
+    ` : ''}
+
+    <!-- Reconvergencia ISIS por redistribución a sitios remotos -->
+    ${(result.isis_reconvergence || []).length > 0 ? `
+    <div class="card" style="margin-bottom:16px;border-color:rgba(139,92,246,0.35)">
+      <div class="card-title" style="color:#a78bfa">
+        📡 Reconvergencia ISIS — tráfico redistribuido transita por el backbone
+        <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:8px">— interfaces lambda del sitio de ingreso alternativo</span>
+      </div>
+      <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px 0">
+        El tráfico ahora entra a la red por un sitio diferente al proveedor fallido.
+        ISIS reconverge para encaminar este tráfico por las lambdas del backbone hasta el PGW de egreso.
+        Las interfaces listadas tendrán carga adicional tras la redistribución BGP.
+      </p>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr>
+            <th>Sitio ingreso (fallback)</th><th>PGW</th><th>Tráfico redistribuido</th>
+            <th>Interfaz lambda</th><th>Nombre lambda</th>
+            <th style="text-align:center">Métrica ISIS</th><th>Sitio egress (PGW destino)</th>
+          </tr></thead>
+          <tbody>
+            ${result.isis_reconvergence.map((r, idx) => `
+            <tr style="${idx === 0 ? 'background:rgba(139,92,246,0.07)' : ''}">
+              <td style="font-family:var(--font-mono);font-size:11px">${r.source_site_name}</td>
+              <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">${r.pgw || ''}</td>
+              <td style="font-weight:600;color:var(--accent-cyan)">${r.absorbed_gbps} Gbps</td>
+              <td style="font-family:var(--font-mono);font-size:10px">${r.interface_name}</td>
+              <td style="font-size:11px">${r.lambda_name}</td>
+              <td style="text-align:center;font-family:var(--font-mono);color:var(--accent-cyan)">${r.isis_metric}</td>
+              <td style="font-family:var(--font-mono);font-size:11px">${r.egress_site_name}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:10px;padding:0 2px">
+        Cada fila muestra la interfaz lambda del sitio fallback cuyo extremo remoto es el MSO donde reside el PGW.
+        Esta es la interfaz que llevará el tráfico redistribuido por el backbone.
+      </div>
+    </div>
+    ` : ''}
   `;
 }
 
